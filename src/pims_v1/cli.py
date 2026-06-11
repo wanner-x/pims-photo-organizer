@@ -13,6 +13,7 @@ from pims_v1.services.duplicate_index_service import build_exact_duplicate_revie
 from pims_v1.services.hash_index_service import compute_missing_md5
 from pims_v1.services.index_service import index_library
 from pims_v1.services.phash_index_service import compute_missing_phash
+from pims_v1.services.review_service import list_series_candidates
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
 from pims_v1.services.series_index_service import build_series_candidates
 from pims_v1.services.status_service import database_status
@@ -52,6 +53,10 @@ def build_parser() -> ArgumentParser:
 
     status = subparsers.add_parser("status")
     status.add_argument("--database-url", default=settings.database_url)
+
+    list_series = subparsers.add_parser("list-series")
+    list_series.add_argument("--limit", type=int, default=20)
+    list_series.add_argument("--database-url", default=settings.database_url)
 
     return parser
 
@@ -191,6 +196,23 @@ def run_status(database_url: str) -> int:
     return 0
 
 
+def run_list_series(limit: int, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        candidates = list_series_candidates(session, limit=limit)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"series_candidates={len(candidates)}")
+    for candidate in candidates:
+        print(
+            f"{candidate['id']} | {candidate['asset_count']} | "
+            f"{candidate['status']} | {candidate['title']} | {candidate['source_root']}"
+        )
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -218,6 +240,8 @@ def main() -> int:
         return run_build_series(min_assets=args.min_assets, database_url=args.database_url)
     if args.command == "status":
         return run_status(database_url=args.database_url)
+    if args.command == "list-series":
+        return run_list_series(limit=args.limit, database_url=args.database_url)
     return 1
 
 
