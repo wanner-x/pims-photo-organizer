@@ -33,6 +33,7 @@ def test_database_status_counts_core_entities(tmp_path):
             file_size=1,
             mtime=1.0,
             hash_md5="abc",
+            hash_phash="ffff0000ffff0000",
         )
     )
     session.add(
@@ -57,6 +58,7 @@ def test_database_status_counts_core_entities(tmp_path):
         "libraries": 1,
         "assets": 2,
         "assets_with_md5": 1,
+        "assets_with_phash": 1,
         "duplicate_groups": 1,
         "series_candidates": 1,
         "review_items_pending": 1,
