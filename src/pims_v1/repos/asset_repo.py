@@ -7,6 +7,13 @@ def find_asset_by_path(session: Session, original_path: str) -> Asset | None:
     return session.query(Asset).filter(Asset.original_path == original_path).one_or_none()
 
 
+def list_assets_missing_md5(session: Session, limit: int | None = None) -> list[Asset]:
+    query = session.query(Asset).filter(Asset.hash_md5.is_(None)).order_by(Asset.id)
+    if limit is not None:
+        query = query.limit(limit)
+    return list(query.all())
+
+
 def upsert_discovered_asset(
     session: Session,
     *,

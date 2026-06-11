@@ -1,4 +1,5 @@
 from pims_v1.models.asset import Asset
+from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
 from pims_v1.models.operation import Operation, OperationBatch
 from pims_v1.models.processing import ProcessingTask, ScanRun
@@ -7,6 +8,8 @@ from pims_v1.models.series import Series, SeriesAsset, SeriesCandidate
 
 __all__ = [
     "Asset",
+    "DuplicateGroup",
+    "DuplicateGroupAsset",
     "Library",
     "Operation",
     "OperationBatch",

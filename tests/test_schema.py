@@ -1,10 +1,12 @@
 from sqlalchemy import inspect
+from sqlalchemy import create_engine
 
-from pims_v1.db import Base, engine
-from pims_v1.models import asset, library, operation, processing, review, series
+from pims_v1.db import Base
+from pims_v1.models import asset, duplicate, library, operation, processing, review, series
 
 
-def test_core_tables_exist():
+def test_core_tables_exist(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'schema.db'}", future=True)
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     inspector = inspect(engine)
@@ -17,3 +19,4 @@ def test_core_tables_exist():
     assert "review_items" in table_names
     assert "processing_tasks" in table_names
     assert "operation_batches" in table_names
+    assert "duplicate_groups" in table_names

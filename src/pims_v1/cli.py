@@ -9,6 +9,8 @@ from sqlalchemy.orm import sessionmaker
 from pims_v1.db import Base
 from pims_v1.config import settings
 from pims_v1 import models
+from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
+from pims_v1.services.hash_index_service import compute_missing_md5
 from pims_v1.services.index_service import index_library
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
 
@@ -28,6 +30,14 @@ def build_parser() -> ArgumentParser:
     index.add_argument("--kind", choices=["local", "nas", "import"], required=True)
     index.add_argument("--limit", type=int, default=None)
     index.add_argument("--database-url", default=settings.database_url)
+
+    hash_md5 = subparsers.add_parser("hash-md5")
+    hash_md5.add_argument("--limit", type=int, default=None)
+    hash_md5.add_argument("--max-size-mb", type=int, default=None)
+    hash_md5.add_argument("--database-url", default=settings.database_url)
+
+    duplicates = subparsers.add_parser("build-duplicates")
+    duplicates.add_argument("--database-url", default=settings.database_url)
 
     return parser
 
@@ -91,6 +101,41 @@ def run_index_library(
     return 0
 
 
+def make_session(database_url: str):
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    return session_factory()
+
+
+def run_hash_md5(limit: int | None, max_size_mb: int | None, database_url: str) -> int:
+    session = make_session(database_url)
+    max_bytes = max_size_mb * 1024 * 1024 if max_size_mb is not None else None
+    try:
+        summary = compute_missing_md5(session=session, limit=limit, max_bytes=max_bytes)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"processed={summary['processed']}")
+    print(f"skipped_missing={summary['skipped_missing']}")
+    print(f"skipped_oversize={summary['skipped_oversize']}")
+    return 0
+
+
+def run_build_duplicates(database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        summary = build_exact_duplicate_reviews(session=session)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"groups={summary['groups']}")
+    print(f"review_items={summary['review_items']}")
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -104,6 +149,14 @@ def main() -> int:
             limit=args.limit,
             database_url=args.database_url,
         )
+    if args.command == "hash-md5":
+        return run_hash_md5(
+            limit=args.limit,
+            max_size_mb=args.max_size_mb,
+            database_url=args.database_url,
+        )
+    if args.command == "build-duplicates":
+        return run_build_duplicates(database_url=args.database_url)
     return 1
 
 
