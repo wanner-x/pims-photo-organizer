@@ -14,6 +14,7 @@ from pims_v1.services.hash_index_service import compute_missing_md5
 from pims_v1.services.index_service import index_library
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
 from pims_v1.services.series_index_service import build_series_candidates
+from pims_v1.services.status_service import database_status
 
 
 def build_parser() -> ArgumentParser:
@@ -43,6 +44,9 @@ def build_parser() -> ArgumentParser:
     series = subparsers.add_parser("build-series")
     series.add_argument("--min-assets", type=int, default=2)
     series.add_argument("--database-url", default=settings.database_url)
+
+    status = subparsers.add_parser("status")
+    status.add_argument("--database-url", default=settings.database_url)
 
     return parser
 
@@ -154,6 +158,19 @@ def run_build_series(min_assets: int, database_url: str) -> int:
     return 0
 
 
+def run_status(database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        status = database_status(session)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    for key, value in status.items():
+        print(f"{key}={value}")
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -177,6 +194,8 @@ def main() -> int:
         return run_build_duplicates(database_url=args.database_url)
     if args.command == "build-series":
         return run_build_series(min_assets=args.min_assets, database_url=args.database_url)
+    if args.command == "status":
+        return run_status(database_url=args.database_url)
     return 1
 
 
