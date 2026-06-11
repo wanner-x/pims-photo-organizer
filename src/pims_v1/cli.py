@@ -16,6 +16,7 @@ from pims_v1.services.phash_index_service import compute_missing_phash
 from pims_v1.services.review_service import list_series_candidates
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
 from pims_v1.services.series_index_service import build_series_candidates
+from pims_v1.services.similar_index_service import build_similar_image_reviews
 from pims_v1.services.status_service import database_status
 
 
@@ -46,6 +47,10 @@ def build_parser() -> ArgumentParser:
 
     duplicates = subparsers.add_parser("build-duplicates")
     duplicates.add_argument("--database-url", default=settings.database_url)
+
+    similar = subparsers.add_parser("build-similar")
+    similar.add_argument("--threshold", type=int, default=6)
+    similar.add_argument("--database-url", default=settings.database_url)
 
     series = subparsers.add_parser("build-series")
     series.add_argument("--min-assets", type=int, default=2)
@@ -170,6 +175,19 @@ def run_build_duplicates(database_url: str) -> int:
     return 0
 
 
+def run_build_similar(threshold: int, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        summary = build_similar_image_reviews(session=session, threshold=threshold)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"groups={summary['groups']}")
+    print(f"review_items={summary['review_items']}")
+    return 0
+
+
 def run_build_series(min_assets: int, database_url: str) -> int:
     session = make_session(database_url)
     try:
@@ -236,6 +254,8 @@ def main() -> int:
         return run_hash_phash(limit=args.limit, database_url=args.database_url)
     if args.command == "build-duplicates":
         return run_build_duplicates(database_url=args.database_url)
+    if args.command == "build-similar":
+        return run_build_similar(threshold=args.threshold, database_url=args.database_url)
     if args.command == "build-series":
         return run_build_series(min_assets=args.min_assets, database_url=args.database_url)
     if args.command == "status":
