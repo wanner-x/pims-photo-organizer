@@ -3,8 +3,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from pims_v1.api.operations import get_session
+from pims_v1.api.review import get_session as get_review_session
 from pims_v1.db import Base
 from pims_v1.main import app
+from pims_v1.models.asset import Asset
+from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
+from pims_v1.models.library import Library
 from pims_v1.models.operation import Operation, OperationBatch
 
 
@@ -114,3 +118,66 @@ def test_operations_api_executes_confirmed_batch(tmp_path):
         "status": "executed",
     }
     assert not source.exists()
+
+
+def test_review_api_lists_exact_duplicate_groups(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    first = Asset(
+        library_id=library_row.id,
+        original_path="/library/a.jpg",
+        current_path="/library/a.jpg",
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+        hash_md5="same",
+    )
+    second = Asset(
+        library_id=library_row.id,
+        original_path="/library/b.jpg",
+        current_path="/library/b.jpg",
+        file_name="b.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+        hash_md5="same",
+    )
+    session.add_all([first, second])
+    session.flush()
+    group = DuplicateGroup(hash_md5="same", asset_count=2)
+    session.add(group)
+    session.flush()
+    session.add_all(
+        [
+            DuplicateGroupAsset(group_id=group.id, asset_id=first.id),
+            DuplicateGroupAsset(group_id=group.id, asset_id=second.id),
+        ]
+    )
+    session.commit()
+    group_id = group.id
+    session.close()
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_review_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.get("/review/duplicates/exact", params={"thumbnail_base": "/thumbs"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"][0]["id"] == group_id
+    assert payload["items"][0]["assets"][0]["thumbnail_url"].startswith("/thumbs/")

@@ -22,6 +22,7 @@ from pims_v1.services.operation_plan_service import (
 )
 from pims_v1.services.phash_index_service import compute_missing_phash
 from pims_v1.services.review_service import list_series_candidates
+from pims_v1.services.safe_workflow_service import run_safe_workflow
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
 from pims_v1.services.series_index_service import build_series_candidates
 from pims_v1.services.series_confirm_service import confirm_series_candidate
@@ -130,6 +131,16 @@ def build_parser() -> ArgumentParser:
     confirm_series.add_argument("candidate_id", type=int)
     confirm_series.add_argument("--archive-root", required=True)
     confirm_series.add_argument("--database-url", default=settings.database_url)
+
+    safe_workflow = subparsers.add_parser("run-safe-workflow")
+    safe_workflow.add_argument("--keep-root", default=None)
+    safe_workflow.add_argument("--cache-root", default=settings.cache_root)
+    safe_workflow.add_argument("--md5-limit", type=int, default=1000)
+    safe_workflow.add_argument("--phash-limit", type=int, default=1000)
+    safe_workflow.add_argument("--thumbnail-limit", type=int, default=1000)
+    safe_workflow.add_argument("--min-series-assets", type=int, default=2)
+    safe_workflow.add_argument("--similar-threshold", type=int, default=6)
+    safe_workflow.add_argument("--database-url", default=settings.database_url)
 
     return parser
 
@@ -567,6 +578,39 @@ def run_confirm_series(candidate_id: int, archive_root: str, database_url: str) 
     return 0
 
 
+def run_safe_workflow_command(
+    *,
+    keep_root: str | None,
+    cache_root: str,
+    md5_limit: int,
+    phash_limit: int,
+    thumbnail_limit: int,
+    min_series_assets: int,
+    similar_threshold: int,
+    database_url: str,
+) -> int:
+    session = make_session(database_url)
+    try:
+        summary = run_safe_workflow(
+            session=session,
+            keep_root=keep_root,
+            cache_root=cache_root,
+            md5_limit=md5_limit,
+            phash_limit=phash_limit,
+            thumbnail_limit=thumbnail_limit,
+            min_series_assets=min_series_assets,
+            similar_threshold=similar_threshold,
+        )
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    for section, values in summary.items():
+        for key, value in values.items():
+            print(f"{section}.{key}={value}")
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -651,6 +695,17 @@ def main() -> int:
         return run_confirm_series(
             candidate_id=args.candidate_id,
             archive_root=args.archive_root,
+            database_url=args.database_url,
+        )
+    if args.command == "run-safe-workflow":
+        return run_safe_workflow_command(
+            keep_root=args.keep_root,
+            cache_root=args.cache_root,
+            md5_limit=args.md5_limit,
+            phash_limit=args.phash_limit,
+            thumbnail_limit=args.thumbnail_limit,
+            min_series_assets=args.min_series_assets,
+            similar_threshold=args.similar_threshold,
             database_url=args.database_url,
         )
     return 1

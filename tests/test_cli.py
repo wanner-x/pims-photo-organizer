@@ -648,3 +648,69 @@ def test_confirm_series_cli_creates_series(tmp_path, capsys, monkeypatch):
     assert "archive_path=/nas/archive/Set 01" in output
     session = session_factory()
     assert session.query(Series).count() == 1
+
+
+def test_run_safe_workflow_cli_builds_duplicate_plan(tmp_path, capsys, monkeypatch):
+    from PIL import Image
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "workflow.db"
+    database_url = f"sqlite:///{db_path}"
+    local_root = tmp_path / "pc"
+    nas_root = tmp_path / "nas"
+    local_root.mkdir()
+    nas_root.mkdir()
+    local_file = local_root / "a.jpg"
+    nas_file = nas_root / "a.jpg"
+    Image.new("RGB", (16, 16), color="white").save(local_file)
+    nas_file.write_bytes(local_file.read_bytes())
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    for path in [local_file, nas_file]:
+        session.add(
+            Asset(
+                library_id=library_row.id,
+                original_path=str(path),
+                current_path=str(path),
+                file_name=path.name,
+                file_ext=path.suffix,
+                file_size=path.stat().st_size,
+                mtime=1.0,
+            )
+        )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pims",
+            "run-safe-workflow",
+            "--keep-root",
+            str(nas_root),
+            "--cache-root",
+            str(tmp_path / ".cache"),
+            "--md5-limit",
+            "10",
+            "--phash-limit",
+            "10",
+            "--thumbnail-limit",
+            "10",
+            "--min-series-assets",
+            "1",
+            "--database-url",
+            database_url,
+        ],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "md5.processed=2" in output
+    assert "duplicate_plan.operations=1" in output
