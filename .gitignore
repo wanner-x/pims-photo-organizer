@@ -1,0 +1,10 @@
+.pytest_cache/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.egg-info/
+data/.cache/
+data/.quarantine/
