@@ -3,6 +3,13 @@ from collections import Counter
 from pathlib import Path
 from time import perf_counter
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from pims_v1.db import Base
+from pims_v1.config import settings
+from pims_v1 import models
+from pims_v1.services.index_service import index_library
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
 
 
@@ -14,6 +21,13 @@ def build_parser() -> ArgumentParser:
     scan_sample.add_argument("root")
     scan_sample.add_argument("--limit", type=int, default=1000)
     scan_sample.add_argument("--all-files", action="store_true")
+
+    index = subparsers.add_parser("index-library")
+    index.add_argument("root")
+    index.add_argument("--name", required=True)
+    index.add_argument("--kind", choices=["local", "nas", "import"], required=True)
+    index.add_argument("--limit", type=int, default=None)
+    index.add_argument("--database-url", default=settings.database_url)
 
     return parser
 
@@ -47,11 +61,49 @@ def run_scan_sample(root: Path, limit: int, all_files: bool) -> int:
     return 0
 
 
+def run_index_library(
+    root: Path,
+    name: str,
+    kind: str,
+    limit: int | None,
+    database_url: str,
+) -> int:
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    try:
+        summary = index_library(
+            session=session,
+            name=name,
+            kind=kind,
+            root_path=root,
+            limit=limit,
+        )
+    finally:
+        session.close()
+
+    print(f"root={root}")
+    print(f"database_url={database_url}")
+    print(f"discovered={summary['discovered']}")
+    print(f"created={summary['created']}")
+    print(f"updated={summary['updated']}")
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     if args.command == "scan-sample":
         return run_scan_sample(Path(args.root), args.limit, args.all_files)
+    if args.command == "index-library":
+        return run_index_library(
+            root=Path(args.root),
+            name=args.name,
+            kind=args.kind,
+            limit=args.limit,
+            database_url=args.database_url,
+        )
     return 1
 
 
