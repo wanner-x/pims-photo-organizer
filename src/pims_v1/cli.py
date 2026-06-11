@@ -24,6 +24,8 @@ from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
 from pims_v1.services.series_index_service import build_series_candidates
 from pims_v1.services.similar_index_service import build_similar_image_reviews
 from pims_v1.services.status_service import database_status
+from pims_v1.services.task_service import enqueue_task, list_tasks, recover_stale_tasks
+from pims_v1.services.task_worker_service import process_md5_tasks
 
 
 def build_parser() -> ArgumentParser:
@@ -84,6 +86,24 @@ def build_parser() -> ArgumentParser:
     execute_batch.add_argument("batch_id", type=int)
     execute_batch.add_argument("--quarantine-root", default=settings.quarantine_root)
     execute_batch.add_argument("--database-url", default=settings.database_url)
+
+    enqueue_md5 = subparsers.add_parser("enqueue-md5-tasks")
+    enqueue_md5.add_argument("--limit", type=int, default=None)
+    enqueue_md5.add_argument("--database-url", default=settings.database_url)
+
+    list_task_parser = subparsers.add_parser("list-tasks")
+    list_task_parser.add_argument("--status", default=None)
+    list_task_parser.add_argument("--limit", type=int, default=100)
+    list_task_parser.add_argument("--database-url", default=settings.database_url)
+
+    recover_tasks = subparsers.add_parser("recover-tasks")
+    recover_tasks.add_argument("--stale-after-seconds", type=int, default=300)
+    recover_tasks.add_argument("--database-url", default=settings.database_url)
+
+    process_md5 = subparsers.add_parser("process-md5-tasks")
+    process_md5.add_argument("--limit", type=int, default=100)
+    process_md5.add_argument("--max-size-mb", type=int, default=None)
+    process_md5.add_argument("--database-url", default=settings.database_url)
 
     return parser
 
@@ -316,6 +336,95 @@ def run_execute_batch(batch_id: int, quarantine_root: str, database_url: str) ->
     return 0
 
 
+def run_enqueue_md5_tasks(limit: int | None, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        query = (
+            session.query(models.Asset)
+            .filter(models.Asset.hash_md5.is_(None))
+            .order_by(models.Asset.id)
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        queued = 0
+        for asset in query.all():
+            before_id = (
+                session.query(models.ProcessingTask.id)
+                .filter(
+                    models.ProcessingTask.task_type == "hash_md5",
+                    models.ProcessingTask.subject_type == "asset",
+                    models.ProcessingTask.subject_id == asset.id,
+                    models.ProcessingTask.status.in_(("pending", "running")),
+                )
+                .scalar()
+            )
+            enqueue_task(session, "hash_md5", "asset", asset.id)
+            if before_id is None:
+                queued += 1
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"queued={queued}")
+    return 0
+
+
+def run_list_tasks(status: str | None, limit: int, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        tasks = list_tasks(session, status=status, limit=limit)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"tasks={len(tasks)}")
+    for task in tasks:
+        print(
+            f"{task['id']} | {task['status']} | {task['attempts']} | "
+            f"{task['task_type']} | {task['subject_type']}:{task['subject_id']} | "
+            f"{task['last_error']}"
+        )
+    return 0
+
+
+def run_recover_tasks(stale_after_seconds: int, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        summary = recover_stale_tasks(
+            session,
+            stale_after_seconds=stale_after_seconds,
+        )
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"recovered={summary['recovered']}")
+    return 0
+
+
+def run_process_md5_tasks(
+    limit: int,
+    max_size_mb: int | None,
+    database_url: str,
+) -> int:
+    session = make_session(database_url)
+    max_bytes = max_size_mb * 1024 * 1024 if max_size_mb is not None else None
+    try:
+        summary = process_md5_tasks(
+            session=session,
+            limit=limit,
+            max_bytes=max_bytes,
+        )
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"processed={summary['processed']}")
+    print(f"failed={summary['failed']}")
+    print(f"skipped_oversize={summary['skipped_oversize']}")
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -360,6 +469,25 @@ def main() -> int:
         return run_execute_batch(
             batch_id=args.batch_id,
             quarantine_root=args.quarantine_root,
+            database_url=args.database_url,
+        )
+    if args.command == "enqueue-md5-tasks":
+        return run_enqueue_md5_tasks(limit=args.limit, database_url=args.database_url)
+    if args.command == "list-tasks":
+        return run_list_tasks(
+            status=args.status,
+            limit=args.limit,
+            database_url=args.database_url,
+        )
+    if args.command == "recover-tasks":
+        return run_recover_tasks(
+            stale_after_seconds=args.stale_after_seconds,
+            database_url=args.database_url,
+        )
+    if args.command == "process-md5-tasks":
+        return run_process_md5_tasks(
+            limit=args.limit,
+            max_size_mb=args.max_size_mb,
             database_url=args.database_url,
         )
     return 1

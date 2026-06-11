@@ -6,6 +6,7 @@ from pims_v1.models import asset, duplicate, library, operation, processing, rev
 from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup
 from pims_v1.models.library import Library
+from pims_v1.models.processing import ProcessingTask
 from pims_v1.models.review import ReviewItem
 from pims_v1.models.series import SeriesCandidate
 from pims_v1.services.status_service import database_status
@@ -50,6 +51,22 @@ def test_database_status_counts_core_entities(tmp_path):
     session.add(DuplicateGroup(hash_md5="abc", asset_count=2))
     session.add(SeriesCandidate(library_id=library_row.id, source_root="/library", title="library"))
     session.add(ReviewItem(item_type="series_confirm", subject_id=1))
+    session.add(
+        ProcessingTask(
+            task_type="hash_md5",
+            subject_type="asset",
+            subject_id=1,
+            status="pending",
+        )
+    )
+    session.add(
+        ProcessingTask(
+            task_type="hash_md5",
+            subject_type="asset",
+            subject_id=2,
+            status="failed",
+        )
+    )
     session.commit()
 
     status = database_status(session)
@@ -62,4 +79,8 @@ def test_database_status_counts_core_entities(tmp_path):
         "duplicate_groups": 1,
         "series_candidates": 1,
         "review_items_pending": 1,
+        "tasks_pending": 1,
+        "tasks_running": 0,
+        "tasks_failed": 1,
+        "tasks_completed": 0,
     }

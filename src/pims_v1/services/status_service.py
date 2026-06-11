@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup
 from pims_v1.models.library import Library
+from pims_v1.models.processing import ProcessingTask
 from pims_v1.models.review import ReviewItem
 from pims_v1.models.series import SeriesCandidate
 
@@ -16,4 +17,8 @@ def database_status(session: Session) -> dict[str, int]:
         "duplicate_groups": session.query(DuplicateGroup).count(),
         "series_candidates": session.query(SeriesCandidate).count(),
         "review_items_pending": session.query(ReviewItem).filter(ReviewItem.status == "pending").count(),
+        "tasks_pending": session.query(ProcessingTask).filter(ProcessingTask.status == "pending").count(),
+        "tasks_running": session.query(ProcessingTask).filter(ProcessingTask.status == "running").count(),
+        "tasks_failed": session.query(ProcessingTask).filter(ProcessingTask.status == "failed").count(),
+        "tasks_completed": session.query(ProcessingTask).filter(ProcessingTask.status == "completed").count(),
     }
