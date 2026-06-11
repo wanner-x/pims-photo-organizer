@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pims_v1.models.base import Base
@@ -22,6 +22,18 @@ class SeriesCandidate(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class SeriesCandidateAsset(Base):
+    __tablename__ = "series_candidate_assets"
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "asset_id", name="uq_series_candidate_asset"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("series_candidates.id"))
+    asset_id: Mapped[int] = mapped_column(ForeignKey("assets.id"))
+    sort_order: Mapped[int] = mapped_column(default=0)
 
 
 class Series(Base):

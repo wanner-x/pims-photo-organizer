@@ -20,3 +20,4 @@ def test_core_tables_exist(tmp_path):
     assert "processing_tasks" in table_names
     assert "operation_batches" in table_names
     assert "duplicate_groups" in table_names
+    assert "series_candidate_assets" in table_names

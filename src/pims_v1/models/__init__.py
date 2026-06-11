@@ -4,7 +4,7 @@ from pims_v1.models.library import Library
 from pims_v1.models.operation import Operation, OperationBatch
 from pims_v1.models.processing import ProcessingTask, ScanRun
 from pims_v1.models.review import ReviewItem
-from pims_v1.models.series import Series, SeriesAsset, SeriesCandidate
+from pims_v1.models.series import Series, SeriesAsset, SeriesCandidate, SeriesCandidateAsset
 
 __all__ = [
     "Asset",
@@ -19,4 +19,5 @@ __all__ = [
     "Series",
     "SeriesAsset",
     "SeriesCandidate",
+    "SeriesCandidateAsset",
 ]
