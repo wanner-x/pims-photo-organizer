@@ -12,6 +12,7 @@ from pims_v1 import models
 from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
 from pims_v1.services.hash_index_service import compute_missing_md5
 from pims_v1.services.index_service import index_library
+from pims_v1.services.phash_index_service import compute_missing_phash
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
 from pims_v1.services.series_index_service import build_series_candidates
 from pims_v1.services.status_service import database_status
@@ -37,6 +38,10 @@ def build_parser() -> ArgumentParser:
     hash_md5.add_argument("--limit", type=int, default=None)
     hash_md5.add_argument("--max-size-mb", type=int, default=None)
     hash_md5.add_argument("--database-url", default=settings.database_url)
+
+    hash_phash = subparsers.add_parser("hash-phash")
+    hash_phash.add_argument("--limit", type=int, default=None)
+    hash_phash.add_argument("--database-url", default=settings.database_url)
 
     duplicates = subparsers.add_parser("build-duplicates")
     duplicates.add_argument("--database-url", default=settings.database_url)
@@ -132,6 +137,21 @@ def run_hash_md5(limit: int | None, max_size_mb: int | None, database_url: str) 
     return 0
 
 
+def run_hash_phash(limit: int | None, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        summary = compute_missing_phash(session=session, limit=limit)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"processed={summary['processed']}")
+    print(f"skipped_missing={summary['skipped_missing']}")
+    print(f"skipped_non_image={summary['skipped_non_image']}")
+    print(f"failed={summary['failed']}")
+    return 0
+
+
 def run_build_duplicates(database_url: str) -> int:
     session = make_session(database_url)
     try:
@@ -190,6 +210,8 @@ def main() -> int:
             max_size_mb=args.max_size_mb,
             database_url=args.database_url,
         )
+    if args.command == "hash-phash":
+        return run_hash_phash(limit=args.limit, database_url=args.database_url)
     if args.command == "build-duplicates":
         return run_build_duplicates(database_url=args.database_url)
     if args.command == "build-series":
