@@ -7,7 +7,7 @@ from pims_v1.models.asset import Asset
 from pims_v1.models.library import Library
 from pims_v1.models.processing import ProcessingTask
 from pims_v1.services.task_service import enqueue_task
-from pims_v1.services.task_worker_service import process_md5_tasks
+from pims_v1.services.task_worker_service import process_md5_tasks, process_phash_tasks
 
 
 def make_session(tmp_path):
@@ -102,3 +102,39 @@ def test_process_md5_tasks_respects_limit(tmp_path):
     assert summary == {"processed": 2, "failed": 0, "skipped_oversize": 0}
     assert completed == 2
     assert pending == 1
+
+
+def test_process_phash_tasks_hashes_image_and_completes_task(tmp_path):
+    from PIL import Image
+
+    session = make_session(tmp_path)
+    source = tmp_path / "a.jpg"
+    Image.new("RGB", (8, 8), color="white").save(source)
+    asset_row = add_asset(session, source)
+    task = enqueue_task(session, "hash_phash", "asset", asset_row.id)
+
+    summary = process_phash_tasks(session=session, limit=10)
+
+    session.refresh(asset_row)
+    session.refresh(task)
+    assert summary == {"processed": 1, "failed": 0, "skipped_non_image": 0}
+    assert asset_row.hash_phash is not None
+    assert asset_row.stage == "phash_done"
+    assert task.status == "completed"
+
+
+def test_process_phash_tasks_skips_non_image_task(tmp_path):
+    session = make_session(tmp_path)
+    source = tmp_path / "a.txt"
+    source.write_text("not image", encoding="utf-8")
+    asset_row = add_asset(session, source)
+    task = enqueue_task(session, "hash_phash", "asset", asset_row.id)
+
+    summary = process_phash_tasks(session=session, limit=10)
+
+    session.refresh(asset_row)
+    session.refresh(task)
+    assert summary == {"processed": 0, "failed": 0, "skipped_non_image": 1}
+    assert asset_row.hash_phash is None
+    assert asset_row.stage == "phash_skipped_non_image"
+    assert task.status == "completed"

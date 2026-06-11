@@ -432,3 +432,219 @@ def test_process_md5_tasks_cli_hashes_queued_asset(tmp_path, capsys, monkeypatch
     assert "processed=1" in output
     session = session_factory()
     assert session.get(Asset, asset_id).hash_md5 == "0b893466231ec15a31520cfb1f761f4f"
+
+
+def test_suggest_series_title_cli_uses_injected_client(tmp_path, capsys, monkeypatch):
+    db_path = tmp_path / "ai.db"
+    database_url = f"sqlite:///{db_path}"
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def chat(self, messages):
+            return "AI Title"
+
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Photos", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path="/library/set/a.jpg",
+        current_path="/library/set/a.jpg",
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset
+
+    candidate = SeriesCandidate(library_id=library_row.id, source_root="/library/set")
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.commit()
+    candidate_id = candidate.id
+    session.close()
+
+    monkeypatch.setattr("pims_v1.cli.DeepSeekClient", FakeClient)
+    monkeypatch.setattr("pims_v1.cli.settings.deepseek_api_key", "test-key")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["pims", "suggest-series-title", str(candidate_id), "--database-url", database_url],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "title=AI Title" in output
+    session = session_factory()
+    assert session.get(SeriesCandidate, candidate_id).status == "ai_suggested"
+
+
+def test_phash_task_cli_enqueue_and_process(tmp_path, capsys, monkeypatch):
+    from PIL import Image
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "phash.db"
+    database_url = f"sqlite:///{db_path}"
+    source = tmp_path / "a.jpg"
+    Image.new("RGB", (8, 8), color="white").save(source)
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(source),
+        current_path=str(source),
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=source.stat().st_size,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.commit()
+    asset_id = asset_row.id
+    session.close()
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["pims", "enqueue-phash-tasks", "--database-url", database_url],
+    )
+    assert main() == 0
+    enqueue_output = capsys.readouterr().out
+    assert "queued=1" in enqueue_output
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["pims", "process-phash-tasks", "--limit", "1", "--database-url", database_url],
+    )
+    assert main() == 0
+    process_output = capsys.readouterr().out
+    assert "processed=1" in process_output
+
+    session = session_factory()
+    assert session.get(Asset, asset_id).hash_phash is not None
+
+
+def test_build_thumbnails_cli_creates_cached_thumbnail(tmp_path, capsys, monkeypatch):
+    from PIL import Image
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "thumbs.db"
+    database_url = f"sqlite:///{db_path}"
+    source = tmp_path / "a.jpg"
+    Image.new("RGB", (80, 80), color="white").save(source)
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(source),
+        current_path=str(source),
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=source.stat().st_size,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.commit()
+    asset_id = asset_row.id
+    session.close()
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pims",
+            "build-thumbnails",
+            "--limit",
+            "1",
+            "--cache-root",
+            str(tmp_path / ".cache"),
+            "--database-url",
+            database_url,
+        ],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "created=1" in output
+    assert (tmp_path / ".cache" / "thumbnails" / f"{asset_id}.jpg").exists()
+
+
+def test_confirm_series_cli_creates_series(tmp_path, capsys, monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "series.db"
+    database_url = f"sqlite:///{db_path}"
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Photos", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path="/library/set/a.jpg",
+        current_path="/library/set/a.jpg",
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    from pims_v1.models.series import Series, SeriesCandidate, SeriesCandidateAsset
+
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root="/library/set",
+        title="Set 01",
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.commit()
+    candidate_id = candidate.id
+    session.close()
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pims",
+            "confirm-series",
+            str(candidate_id),
+            "--archive-root",
+            "/nas/archive",
+            "--database-url",
+            database_url,
+        ],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "archive_path=/nas/archive/Set 01" in output
+    session = session_factory()
+    assert session.query(Series).count() == 1

@@ -9,6 +9,8 @@ from sqlalchemy.orm import sessionmaker
 from pims_v1.db import Base
 from pims_v1.config import settings
 from pims_v1 import models
+from pims_v1.services.ai_naming_service import suggest_series_title
+from pims_v1.services.deepseek_client import DeepSeekClient
 from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
 from pims_v1.services.hash_index_service import compute_missing_md5
 from pims_v1.services.index_service import index_library
@@ -22,10 +24,12 @@ from pims_v1.services.phash_index_service import compute_missing_phash
 from pims_v1.services.review_service import list_series_candidates
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
 from pims_v1.services.series_index_service import build_series_candidates
+from pims_v1.services.series_confirm_service import confirm_series_candidate
 from pims_v1.services.similar_index_service import build_similar_image_reviews
 from pims_v1.services.status_service import database_status
 from pims_v1.services.task_service import enqueue_task, list_tasks, recover_stale_tasks
-from pims_v1.services.task_worker_service import process_md5_tasks
+from pims_v1.services.task_worker_service import process_md5_tasks, process_phash_tasks
+from pims_v1.services.thumbnail_service import ensure_thumbnail
 
 
 def build_parser() -> ArgumentParser:
@@ -104,6 +108,28 @@ def build_parser() -> ArgumentParser:
     process_md5.add_argument("--limit", type=int, default=100)
     process_md5.add_argument("--max-size-mb", type=int, default=None)
     process_md5.add_argument("--database-url", default=settings.database_url)
+
+    suggest_title = subparsers.add_parser("suggest-series-title")
+    suggest_title.add_argument("candidate_id", type=int)
+    suggest_title.add_argument("--database-url", default=settings.database_url)
+
+    enqueue_phash = subparsers.add_parser("enqueue-phash-tasks")
+    enqueue_phash.add_argument("--limit", type=int, default=None)
+    enqueue_phash.add_argument("--database-url", default=settings.database_url)
+
+    process_phash = subparsers.add_parser("process-phash-tasks")
+    process_phash.add_argument("--limit", type=int, default=100)
+    process_phash.add_argument("--database-url", default=settings.database_url)
+
+    thumbnails = subparsers.add_parser("build-thumbnails")
+    thumbnails.add_argument("--limit", type=int, default=100)
+    thumbnails.add_argument("--cache-root", default=settings.cache_root)
+    thumbnails.add_argument("--database-url", default=settings.database_url)
+
+    confirm_series = subparsers.add_parser("confirm-series")
+    confirm_series.add_argument("candidate_id", type=int)
+    confirm_series.add_argument("--archive-root", required=True)
+    confirm_series.add_argument("--database-url", default=settings.database_url)
 
     return parser
 
@@ -425,6 +451,122 @@ def run_process_md5_tasks(
     return 0
 
 
+def run_suggest_series_title(candidate_id: int, database_url: str) -> int:
+    session = make_session(database_url)
+    client = DeepSeekClient(
+        api_key=settings.deepseek_api_key,
+        base_url=settings.deepseek_base_url,
+        model=settings.deepseek_model,
+    )
+    try:
+        result = suggest_series_title(
+            session=session,
+            candidate_id=candidate_id,
+            client=client,
+        )
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"candidate_id={result['candidate_id']}")
+    print(f"title={result['title']}")
+    return 0
+
+
+def run_enqueue_phash_tasks(limit: int | None, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        query = (
+            session.query(models.Asset)
+            .filter(models.Asset.hash_phash.is_(None))
+            .order_by(models.Asset.id)
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        queued = 0
+        for asset in query.all():
+            before_id = (
+                session.query(models.ProcessingTask.id)
+                .filter(
+                    models.ProcessingTask.task_type == "hash_phash",
+                    models.ProcessingTask.subject_type == "asset",
+                    models.ProcessingTask.subject_id == asset.id,
+                    models.ProcessingTask.status.in_(("pending", "running")),
+                )
+                .scalar()
+            )
+            enqueue_task(session, "hash_phash", "asset", asset.id)
+            if before_id is None:
+                queued += 1
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"queued={queued}")
+    return 0
+
+
+def run_process_phash_tasks(limit: int, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        summary = process_phash_tasks(session=session, limit=limit)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"processed={summary['processed']}")
+    print(f"failed={summary['failed']}")
+    print(f"skipped_non_image={summary['skipped_non_image']}")
+    return 0
+
+
+def run_build_thumbnails(limit: int, cache_root: str, database_url: str) -> int:
+    session = make_session(database_url)
+    summary = {
+        "created": 0,
+        "exists": 0,
+        "skipped_non_image": 0,
+        "missing": 0,
+        "failed": 0,
+    }
+    try:
+        assets = session.query(models.Asset).order_by(models.Asset.id).limit(limit).all()
+        for asset in assets:
+            result = ensure_thumbnail(
+                session=session,
+                asset_id=asset.id,
+                cache_root=cache_root,
+            )
+            status = str(result["status"])
+            if status in summary:
+                summary[status] += 1
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    for key, value in summary.items():
+        print(f"{key}={value}")
+    return 0
+
+
+def run_confirm_series(candidate_id: int, archive_root: str, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        result = confirm_series_candidate(
+            session=session,
+            candidate_id=candidate_id,
+            archive_root=archive_root,
+        )
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"candidate_id={result['candidate_id']}")
+    print(f"series_id={result['series_id']}")
+    print(f"archive_path={result['archive_path']}")
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -488,6 +630,27 @@ def main() -> int:
         return run_process_md5_tasks(
             limit=args.limit,
             max_size_mb=args.max_size_mb,
+            database_url=args.database_url,
+        )
+    if args.command == "suggest-series-title":
+        return run_suggest_series_title(
+            candidate_id=args.candidate_id,
+            database_url=args.database_url,
+        )
+    if args.command == "enqueue-phash-tasks":
+        return run_enqueue_phash_tasks(limit=args.limit, database_url=args.database_url)
+    if args.command == "process-phash-tasks":
+        return run_process_phash_tasks(limit=args.limit, database_url=args.database_url)
+    if args.command == "build-thumbnails":
+        return run_build_thumbnails(
+            limit=args.limit,
+            cache_root=args.cache_root,
+            database_url=args.database_url,
+        )
+    if args.command == "confirm-series":
+        return run_confirm_series(
+            candidate_id=args.candidate_id,
+            archive_root=args.archive_root,
             database_url=args.database_url,
         )
     return 1
