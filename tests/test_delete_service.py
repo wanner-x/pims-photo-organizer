@@ -11,3 +11,20 @@ def test_move_to_quarantine_preserves_file(tmp_path):
     assert quarantined.exists()
     assert quarantined.read_bytes() == b"content"
     assert not source.exists()
+
+
+def test_move_to_quarantine_does_not_overwrite_existing_file(tmp_path):
+    first = tmp_path / "first" / "same.jpg"
+    second = tmp_path / "second" / "same.jpg"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    quarantine_root = tmp_path / ".quarantine"
+
+    first_quarantined = move_to_quarantine(first, quarantine_root)
+    second_quarantined = move_to_quarantine(second, quarantine_root)
+
+    assert first_quarantined.read_bytes() == b"first"
+    assert second_quarantined.read_bytes() == b"second"
+    assert first_quarantined != second_quarantined

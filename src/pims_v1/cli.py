@@ -12,6 +12,12 @@ from pims_v1 import models
 from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
 from pims_v1.services.hash_index_service import compute_missing_md5
 from pims_v1.services.index_service import index_library
+from pims_v1.services.operation_plan_service import (
+    confirm_operation_batch,
+    create_duplicate_quarantine_plan,
+    execute_confirmed_batch,
+    list_operation_batches,
+)
 from pims_v1.services.phash_index_service import compute_missing_phash
 from pims_v1.services.review_service import list_series_candidates
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
@@ -62,6 +68,22 @@ def build_parser() -> ArgumentParser:
     list_series = subparsers.add_parser("list-series")
     list_series.add_argument("--limit", type=int, default=20)
     list_series.add_argument("--database-url", default=settings.database_url)
+
+    duplicate_plan = subparsers.add_parser("plan-duplicate-quarantine")
+    duplicate_plan.add_argument("--keep-root", required=True)
+    duplicate_plan.add_argument("--database-url", default=settings.database_url)
+
+    list_batches = subparsers.add_parser("list-batches")
+    list_batches.add_argument("--database-url", default=settings.database_url)
+
+    confirm_batch = subparsers.add_parser("confirm-batch")
+    confirm_batch.add_argument("batch_id", type=int)
+    confirm_batch.add_argument("--database-url", default=settings.database_url)
+
+    execute_batch = subparsers.add_parser("execute-batch")
+    execute_batch.add_argument("batch_id", type=int)
+    execute_batch.add_argument("--quarantine-root", default=settings.quarantine_root)
+    execute_batch.add_argument("--database-url", default=settings.database_url)
 
     return parser
 
@@ -231,6 +253,69 @@ def run_list_series(limit: int, database_url: str) -> int:
     return 0
 
 
+def run_plan_duplicate_quarantine(keep_root: str, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        summary = create_duplicate_quarantine_plan(session=session, keep_root=keep_root)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"batch_id={summary['batch_id']}")
+    print(f"operations={summary['operations']}")
+    return 0
+
+
+def run_list_batches(database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        batches = list_operation_batches(session=session)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"batches={len(batches)}")
+    for batch in batches:
+        print(
+            f"{batch['id']} | {batch['operation_count']} | "
+            f"{batch['status']} | {batch['batch_type']} | {batch['description']}"
+        )
+    return 0
+
+
+def run_confirm_batch(batch_id: int, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        summary = confirm_operation_batch(session=session, batch_id=batch_id)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"batch_id={summary['batch_id']}")
+    print(f"operations={summary['operations']}")
+    print(f"status={summary['status']}")
+    return 0
+
+
+def run_execute_batch(batch_id: int, quarantine_root: str, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        summary = execute_confirmed_batch(
+            session=session,
+            batch_id=batch_id,
+            quarantine_root=quarantine_root,
+        )
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"batch_id={summary['batch_id']}")
+    print(f"executed={summary['executed']}")
+    print(f"failed={summary['failed']}")
+    print(f"status={summary['status']}")
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -262,6 +347,21 @@ def main() -> int:
         return run_status(database_url=args.database_url)
     if args.command == "list-series":
         return run_list_series(limit=args.limit, database_url=args.database_url)
+    if args.command == "plan-duplicate-quarantine":
+        return run_plan_duplicate_quarantine(
+            keep_root=args.keep_root,
+            database_url=args.database_url,
+        )
+    if args.command == "list-batches":
+        return run_list_batches(database_url=args.database_url)
+    if args.command == "confirm-batch":
+        return run_confirm_batch(batch_id=args.batch_id, database_url=args.database_url)
+    if args.command == "execute-batch":
+        return run_execute_batch(
+            batch_id=args.batch_id,
+            quarantine_root=args.quarantine_root,
+            database_url=args.database_url,
+        )
     return 1
 
 
