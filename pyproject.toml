@@ -25,6 +25,9 @@ dev = [
   "pytest>=8.2.0",
 ]
 
+[project.scripts]
+pims = "pims_v1.cli:main"
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
