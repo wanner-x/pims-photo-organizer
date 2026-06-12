@@ -10,6 +10,7 @@ from pims_v1.db import Base
 from pims_v1.config import settings
 from pims_v1 import models
 from pims_v1.services.ai_naming_service import suggest_series_title
+from pims_v1.services.backup_service import backup_sqlite_database
 from pims_v1.services.deepseek_client import DeepSeekClient
 from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
 from pims_v1.services.hash_index_service import compute_missing_md5
@@ -17,6 +18,7 @@ from pims_v1.services.index_service import index_library
 from pims_v1.services.operation_plan_service import (
     confirm_operation_batch,
     create_duplicate_quarantine_plan,
+    exclude_operation,
     execute_confirmed_batch,
     list_operation_batches,
 )
@@ -87,6 +89,10 @@ def build_parser() -> ArgumentParser:
     confirm_batch.add_argument("batch_id", type=int)
     confirm_batch.add_argument("--database-url", default=settings.database_url)
 
+    exclude = subparsers.add_parser("exclude-operation")
+    exclude.add_argument("operation_id", type=int)
+    exclude.add_argument("--database-url", default=settings.database_url)
+
     execute_batch = subparsers.add_parser("execute-batch")
     execute_batch.add_argument("batch_id", type=int)
     execute_batch.add_argument("--quarantine-root", default=settings.quarantine_root)
@@ -141,6 +147,11 @@ def build_parser() -> ArgumentParser:
     safe_workflow.add_argument("--min-series-assets", type=int, default=2)
     safe_workflow.add_argument("--similar-threshold", type=int, default=6)
     safe_workflow.add_argument("--database-url", default=settings.database_url)
+
+    backup = subparsers.add_parser("backup-db")
+    backup.add_argument("--database-url", default=settings.database_url)
+    backup.add_argument("--backup-dir", default="./data/backups")
+    backup.add_argument("--label", default="manual")
 
     return parser
 
@@ -350,6 +361,19 @@ def run_confirm_batch(batch_id: int, database_url: str) -> int:
     print(f"database_url={database_url}")
     print(f"batch_id={summary['batch_id']}")
     print(f"operations={summary['operations']}")
+    print(f"status={summary['status']}")
+    return 0
+
+
+def run_exclude_operation(operation_id: int, database_url: str) -> int:
+    session = make_session(database_url)
+    try:
+        summary = exclude_operation(session=session, operation_id=operation_id)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"operation_id={summary['operation_id']}")
     print(f"status={summary['status']}")
     return 0
 
@@ -611,6 +635,18 @@ def run_safe_workflow_command(
     return 0
 
 
+def run_backup_db(database_url: str, backup_dir: str, label: str) -> int:
+    result = backup_sqlite_database(
+        database_url=database_url,
+        backup_dir=backup_dir,
+        label=label,
+    )
+    print(f"database_url={database_url}")
+    print(f"status={result['status']}")
+    print(f"path={result['path']}")
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -651,6 +687,11 @@ def main() -> int:
         return run_list_batches(database_url=args.database_url)
     if args.command == "confirm-batch":
         return run_confirm_batch(batch_id=args.batch_id, database_url=args.database_url)
+    if args.command == "exclude-operation":
+        return run_exclude_operation(
+            operation_id=args.operation_id,
+            database_url=args.database_url,
+        )
     if args.command == "execute-batch":
         return run_execute_batch(
             batch_id=args.batch_id,
@@ -707,6 +748,12 @@ def main() -> int:
             min_series_assets=args.min_series_assets,
             similar_threshold=args.similar_threshold,
             database_url=args.database_url,
+        )
+    if args.command == "backup-db":
+        return run_backup_db(
+            database_url=args.database_url,
+            backup_dir=args.backup_dir,
+            label=args.label,
         )
     return 1
 

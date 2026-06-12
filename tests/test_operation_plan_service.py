@@ -11,6 +11,7 @@ from pims_v1.services.operation_plan_service import (
     confirm_operation_batch,
     create_duplicate_quarantine_plan,
     execute_confirmed_batch,
+    exclude_operation,
     list_operation_batches,
 )
 
@@ -75,6 +76,43 @@ def test_create_duplicate_quarantine_plan_keeps_nas_copy(tmp_path):
     assert planned.from_path == "D:\\photos\\set\\a.jpg"
 
 
+def test_create_duplicate_quarantine_plan_does_not_duplicate_active_operations(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Photos", kind="local", root_path="D:\\photos")
+    session.add(library_row)
+    session.flush()
+    nas_asset = add_asset(
+        session,
+        library_row.id,
+        "\\\\192.168.31.10\\personal_folder\\nas_photos\\set\\a.jpg",
+        "same",
+    )
+    local_asset = add_asset(session, library_row.id, "D:\\photos\\set\\a.jpg", "same")
+    group = DuplicateGroup(hash_md5="same", asset_count=2)
+    session.add(group)
+    session.flush()
+    session.add_all(
+        [
+            DuplicateGroupAsset(group_id=group.id, asset_id=nas_asset.id),
+            DuplicateGroupAsset(group_id=group.id, asset_id=local_asset.id),
+        ]
+    )
+    session.commit()
+
+    first = create_duplicate_quarantine_plan(
+        session=session,
+        keep_root="\\\\192.168.31.10\\personal_folder\\nas_photos",
+    )
+    second = create_duplicate_quarantine_plan(
+        session=session,
+        keep_root="\\\\192.168.31.10\\personal_folder\\nas_photos",
+    )
+
+    assert first["operations"] == 1
+    assert second["operations"] == 0
+    assert session.query(Operation).count() == 1
+
+
 def test_confirm_operation_batch_marks_planned_operations_confirmed(tmp_path):
     session = make_session(tmp_path)
     batch = OperationBatch(batch_type="duplicate_quarantine", status="planned")
@@ -96,6 +134,27 @@ def test_confirm_operation_batch_marks_planned_operations_confirmed(tmp_path):
     assert result == {"batch_id": batch.id, "operations": 1, "status": "confirmed"}
     assert batch.status == "confirmed"
     assert operation_row.status == "confirmed"
+
+
+def test_exclude_operation_marks_planned_operation_excluded(tmp_path):
+    session = make_session(tmp_path)
+    batch = OperationBatch(batch_type="duplicate_quarantine", status="planned")
+    session.add(batch)
+    session.flush()
+    operation = Operation(
+        batch_id=batch.id,
+        operation_type="quarantine_duplicate",
+        from_path="D:\\photos\\a.jpg",
+        status="planned",
+    )
+    session.add(operation)
+    session.commit()
+
+    result = exclude_operation(session=session, operation_id=operation.id)
+
+    session.refresh(operation)
+    assert result == {"operation_id": operation.id, "status": "excluded"}
+    assert operation.status == "excluded"
 
 
 def test_list_operation_batches_includes_operation_counts(tmp_path):

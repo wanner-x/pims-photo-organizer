@@ -99,15 +99,18 @@ def test_operations_api_executes_confirmed_batch(tmp_path):
         finally:
             test_session.close()
 
+    quarantine_root = tmp_path / ".configured-quarantine"
     app.dependency_overrides[get_session] = override_get_session
     try:
+        import pims_v1.api.operations as operations_api
+
+        old_quarantine_root = operations_api.settings.quarantine_root
+        operations_api.settings.quarantine_root = str(quarantine_root)
         client = TestClient(app)
 
-        response = client.post(
-            f"/operations/batches/{batch_id}/execute",
-            params={"quarantine_root": str(tmp_path / ".quarantine")},
-        )
+        response = client.post(f"/operations/batches/{batch_id}/execute")
     finally:
+        operations_api.settings.quarantine_root = old_quarantine_root
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
@@ -118,6 +121,77 @@ def test_operations_api_executes_confirmed_batch(tmp_path):
         "status": "executed",
     }
     assert not source.exists()
+    assert (quarantine_root / "a.jpg").exists()
+
+
+def test_operations_api_requires_token_when_configured(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        import pims_v1.api.operations as operations_api
+
+        old_token = operations_api.settings.api_token
+        operations_api.settings.api_token = "secret"
+        client = TestClient(app)
+
+        unauthorized = client.post("/operations/batches/1/confirm")
+        authorized = client.post(
+            "/operations/batches/1/confirm",
+            headers={"x-pims-api-token": "secret"},
+        )
+    finally:
+        operations_api.settings.api_token = old_token
+        app.dependency_overrides.clear()
+
+    assert unauthorized.status_code == 401
+    assert authorized.status_code == 400
+
+
+def test_operations_api_excludes_planned_operation(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    batch = OperationBatch(batch_type="duplicate_quarantine", status="planned")
+    session.add(batch)
+    session.flush()
+    operation = Operation(
+        batch_id=batch.id,
+        operation_type="quarantine_duplicate",
+        from_path="D:\\photos\\a.jpg",
+        status="planned",
+    )
+    session.add(operation)
+    session.commit()
+    operation_id = operation.id
+    session.close()
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.post(f"/operations/{operation_id}/exclude")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"operation_id": operation_id, "status": "excluded"}
 
 
 def test_review_api_lists_exact_duplicate_groups(tmp_path):

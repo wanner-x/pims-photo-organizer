@@ -180,6 +180,49 @@ def test_confirm_batch_cli_marks_batch_confirmed(tmp_path, capsys, monkeypatch):
     assert session.get(OperationBatch, batch_id).status == "confirmed"
 
 
+def test_exclude_operation_cli_marks_operation_excluded(tmp_path, capsys, monkeypatch):
+    db_path = tmp_path / "ops.db"
+    database_url = f"sqlite:///{db_path}"
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    batch = OperationBatch(batch_type="duplicate_quarantine", status="planned")
+    session.add(batch)
+    session.flush()
+    operation = Operation(
+        batch_id=batch.id,
+        operation_type="quarantine_duplicate",
+        from_path="D:\\photos\\a.jpg",
+        status="planned",
+    )
+    session.add(operation)
+    session.commit()
+    operation_id = operation.id
+    session.close()
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pims",
+            "exclude-operation",
+            str(operation_id),
+            "--database-url",
+            database_url,
+        ],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "status=excluded" in output
+    session = session_factory()
+    assert session.get(Operation, operation_id).status == "excluded"
+
+
 def test_execute_batch_cli_moves_confirmed_file_to_quarantine(tmp_path, capsys, monkeypatch):
     db_path = tmp_path / "ops.db"
     database_url = f"sqlite:///{db_path}"
@@ -714,3 +757,29 @@ def test_run_safe_workflow_cli_builds_duplicate_plan(tmp_path, capsys, monkeypat
     output = capsys.readouterr().out
     assert "md5.processed=2" in output
     assert "duplicate_plan.operations=1" in output
+
+
+def test_backup_db_cli_copies_sqlite_database(tmp_path, capsys, monkeypatch):
+    database = tmp_path / "pims.db"
+    database.write_bytes(b"sqlite-data")
+    backup_dir = tmp_path / "backups"
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pims",
+            "backup-db",
+            "--database-url",
+            f"sqlite:///{database}",
+            "--backup-dir",
+            str(backup_dir),
+            "--label",
+            "manual",
+        ],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "status=created" in output
+    assert (backup_dir / "manual-pims.db").exists()

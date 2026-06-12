@@ -58,6 +58,17 @@ def create_duplicate_quarantine_plan(session: Session, keep_root: str) -> dict[s
         for asset in assets:
             if asset.id == keep_asset.id:
                 continue
+            existing = (
+                session.query(Operation.id)
+                .filter(
+                    Operation.operation_type == "quarantine_duplicate",
+                    Operation.asset_id == asset.id,
+                    Operation.status.in_(("planned", "confirmed", "executed")),
+                )
+                .first()
+            )
+            if existing is not None:
+                continue
             session.add(
                 Operation(
                     batch_id=batch.id,
@@ -71,6 +82,17 @@ def create_duplicate_quarantine_plan(session: Session, keep_root: str) -> dict[s
 
     session.commit()
     return {"batch_id": batch.id, "operations": operation_count}
+
+
+def exclude_operation(session: Session, operation_id: int) -> dict[str, int | str]:
+    operation = session.get(Operation, operation_id)
+    if operation is None:
+        raise ValueError(f"Operation not found: {operation_id}")
+    if operation.status != "planned":
+        raise ValueError(f"Operation is not planned: {operation.status}")
+    operation.status = "excluded"
+    session.commit()
+    return {"operation_id": operation.id, "status": operation.status}
 
 
 def confirm_operation_batch(session: Session, batch_id: int) -> dict[str, int | str]:
