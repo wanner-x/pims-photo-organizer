@@ -225,6 +225,11 @@ def test_review_ui_page_exists():
     assert "目标路径" in response.text
     assert "plan-summary" in response.text
     assert "risk-flags" in response.text
+    assert "审核功能导航" in response.text
+    assert "data-view-target=\"series\"" in response.text
+    assert "data-view-panel=\"duplicates\"" in response.text
+    assert "AI 系列整理" in response.text
+    assert "重复隔离审核" in response.text
 
 
 def test_review_ui_inline_video_preview_does_not_show_player_controls():

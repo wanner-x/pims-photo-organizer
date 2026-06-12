@@ -127,6 +127,33 @@ REVIEW_UI_HTML = r"""<!doctype html>
       display: grid;
       gap: 10px;
     }
+    .view-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 6px 0 2px;
+    }
+    .view-tab {
+      border-radius: 18px;
+      padding: 11px 14px;
+      text-align: left;
+      background: rgba(255, 255, 255, .74);
+      border: 1px solid var(--line);
+      min-width: min(100%, 210px);
+      box-shadow: 0 10px 28px rgba(37, 103, 94, .08);
+    }
+    .view-tab.active {
+      background: linear-gradient(135deg, rgba(66, 184, 131, .18), rgba(124, 201, 232, .18));
+      outline: 3px solid rgba(22, 143, 159, .14);
+    }
+    .view-tab span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      margin-top: 2px;
+    }
+    .view-panel[hidden] { display: none !important; }
     .runtime-head {
       display: flex;
       justify-content: space-between;
@@ -451,6 +478,8 @@ REVIEW_UI_HTML = r"""<!doctype html>
       .actions button {
         width: 100%;
       }
+      .view-nav { display: grid; grid-template-columns: 1fr; }
+      .view-tab { width: 100%; }
       .series-list { grid-template-columns: 1fr; padding: 10px; }
       .series-fields { grid-template-columns: 1fr; }
       .series-assets { grid-template-columns: repeat(3, 1fr); }
@@ -485,40 +514,47 @@ REVIEW_UI_HTML = r"""<!doctype html>
         <a href="/docs">接口文档</a>
       </div>
     </div>
-    <div class="progress-grid" aria-label="整理进度">
-      <div class="metric">
-        <div class="label">媒体文件总数</div>
-        <div class="value" id="asset-total">-</div>
-        <div class="meta">已完成全量索引的文件数量</div>
-      </div>
-      <div class="metric">
-        <div class="label">MD5 精确重复检测</div>
-        <div class="value" id="md5-value">-</div>
-        <div class="bar"><span id="md5-bar"></span></div>
-      </div>
-      <div class="metric">
-        <div class="label">pHash 相似图片检测</div>
-        <div class="value" id="phash-value">-</div>
-        <div class="bar"><span id="phash-bar"></span></div>
-      </div>
-      <div class="metric">
-        <div class="label">待审核项目</div>
-        <div class="value" id="review-pending">-</div>
-        <div class="meta" id="operation-summary">操作计划加载中</div>
-      </div>
-    </div>
-    <div class="runtime-panel">
-      <div class="runtime-head">
-        <div>
-          <strong>后台任务状态</strong>
-          <div class="meta" id="task-summary">任务队列加载中</div>
+    <nav class="view-nav" aria-label="审核功能导航">
+      <button class="view-tab active" data-view-target="overview" type="button">总览进度<span>看全量检测、后台任务和日志</span></button>
+      <button class="view-tab" data-view-target="series" type="button">AI 系列整理<span>审核 AI 命名、分类和 NAS 移动目标</span></button>
+      <button class="view-tab" data-view-target="duplicates" type="button">重复隔离审核<span>对比已存在位置和重复位置，再确认隔离</span></button>
+    </nav>
+    <div id="view-overview" class="view-panel" data-view-panel="overview">
+      <div class="progress-grid" aria-label="整理进度">
+        <div class="metric">
+          <div class="label">媒体文件总数</div>
+          <div class="value" id="asset-total">-</div>
+          <div class="meta">已完成全量索引的文件数量</div>
         </div>
-        <button id="refresh-log">刷新日志</button>
+        <div class="metric">
+          <div class="label">MD5 精确重复检测</div>
+          <div class="value" id="md5-value">-</div>
+          <div class="bar"><span id="md5-bar"></span></div>
+        </div>
+        <div class="metric">
+          <div class="label">pHash 相似图片检测</div>
+          <div class="value" id="phash-value">-</div>
+          <div class="bar"><span id="phash-bar"></span></div>
+        </div>
+        <div class="metric">
+          <div class="label">待审核项目</div>
+          <div class="value" id="review-pending">-</div>
+          <div class="meta" id="operation-summary">操作计划加载中</div>
+        </div>
       </div>
-      <pre id="log-tail" class="log-tail">日志加载中...</pre>
+      <div class="runtime-panel">
+        <div class="runtime-head">
+          <div>
+            <strong>后台任务状态</strong>
+            <div class="meta" id="task-summary">任务队列加载中</div>
+          </div>
+          <button id="refresh-log">刷新日志</button>
+        </div>
+        <pre id="log-tail" class="log-tail">日志加载中...</pre>
+      </div>
     </div>
   </header>
-  <section class="series-review-panel">
+  <section id="view-series" class="series-review-panel view-panel" data-view-panel="series" hidden>
     <div class="section-head">
       <div>
         <h2>AI 系列整理审核</h2>
@@ -538,7 +574,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
       <div class="empty">系列候选加载中...</div>
     </div>
   </section>
-  <main>
+  <main id="view-duplicates" class="view-panel" data-view-panel="duplicates" hidden>
     <section>
       <div class="section-head">
         <h2>待确认隔离批次</h2>
@@ -575,7 +611,17 @@ REVIEW_UI_HTML = r"""<!doctype html>
     <div id="preview-modal-content"></div>
   </div>
   <script>
-    const state = { batches: [], batchId: null, offset: 0, limit: 100, total: 0, series: [], selectedSeriesIds: new Set() };
+    const viewNames = new Set(["overview", "series", "duplicates"]);
+    const state = {
+      activeView: "overview",
+      batches: [],
+      batchId: null,
+      offset: 0,
+      limit: 100,
+      total: 0,
+      series: [],
+      selectedSeriesIds: new Set(),
+    };
     const videoExts = new Set([".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"]);
     const imageExts = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"]);
     const el = (id) => document.getElementById(id);
@@ -612,6 +658,30 @@ REVIEW_UI_HTML = r"""<!doctype html>
         button.removeAttribute("aria-busy");
         button.disabled = false;
       }
+    };
+    const refreshActiveView = async () => {
+      if (state.activeView === "overview") {
+        await Promise.all([loadProgress(), loadLog()]);
+        return;
+      }
+      if (state.activeView === "series") {
+        await Promise.all([loadProgress(), loadSeries()]);
+        return;
+      }
+      await Promise.all([loadProgress(), loadBatches()]);
+      if (state.batchId) await loadOperations();
+    };
+    const switchView = (view, updateHash = true) => {
+      const nextView = viewNames.has(view) ? view : "overview";
+      state.activeView = nextView;
+      document.querySelectorAll("[data-view-panel]").forEach((panel) => {
+        panel.hidden = panel.dataset.viewPanel !== nextView;
+      });
+      document.querySelectorAll("[data-view-target]").forEach((tab) => {
+        tab.classList.toggle("active", tab.dataset.viewTarget === nextView);
+      });
+      if (updateHash) history.replaceState(null, "", `#${nextView}`);
+      refreshActiveView().catch((error) => setStatus(`刷新失败：${error.message}`));
     };
     const jsonFetch = async (url, options = {}) => {
       const response = await fetch(url, {
@@ -1059,7 +1129,11 @@ REVIEW_UI_HTML = r"""<!doctype html>
       await Promise.all([loadProgress(), loadBatches(), loadSeries(), loadLog()]);
       if (state.batchId) await loadOperations();
     };
-    el("refresh").addEventListener("click", () => refreshAll().catch((error) => setStatus(`刷新失败：${error.message}`)));
+    document.querySelectorAll("[data-view-target]").forEach((tab) => {
+      tab.addEventListener("click", () => switchView(tab.dataset.viewTarget));
+    });
+    window.addEventListener("hashchange", () => switchView(window.location.hash.slice(1), false));
+    el("refresh").addEventListener("click", () => refreshActiveView().catch((error) => setStatus(`刷新失败：${error.message}`)));
     el("refresh-series").addEventListener("click", () => loadSeries().catch((error) => setStatus(`系列加载失败：${error.message}`)));
     el("select-visible-series").addEventListener("click", selectVisibleSeries);
     el("clear-series-selection").addEventListener("click", clearSeriesSelection);
@@ -1108,7 +1182,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
       });
       socket.addEventListener("error", () => socket.close());
     };
-    refreshAll().catch((error) => setStatus(`加载失败：${error.message}`));
+    switchView(window.location.hash.slice(1) || "overview", false);
     connectProgressSocket();
   </script>
 </body>
