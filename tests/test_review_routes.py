@@ -213,6 +213,27 @@ def test_review_ui_page_exists():
     assert "openPreview" in response.text
 
 
+def test_review_ui_inline_video_preview_does_not_show_player_controls():
+    client = TestClient(app)
+
+    response = client.get("/review-ui")
+
+    assert response.status_code == 200
+    assert "video.muted = true;" in response.text
+    assert "video.playsInline = true;" in response.text
+    assert "video.pause();" in response.text
+
+
+def test_review_ui_handles_progress_socket_error_payload():
+    client = TestClient(app)
+
+    response = client.get("/review-ui")
+
+    assert response.status_code == 200
+    assert 'payload.type === "error"' in response.text
+    assert "payload.message" in response.text
+
+
 def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
     Base.metadata.create_all(bind=engine)

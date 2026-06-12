@@ -78,7 +78,14 @@ async def progress_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
     try:
         while True:
-            await websocket.send_json(_progress_snapshot())
+            try:
+                payload = await asyncio.to_thread(_progress_snapshot)
+            except Exception:
+                payload = {
+                    "type": "error",
+                    "message": "自动刷新暂时失败，正在继续重试。",
+                }
+            await websocket.send_json(payload)
             await asyncio.sleep(5)
     except WebSocketDisconnect:
         return

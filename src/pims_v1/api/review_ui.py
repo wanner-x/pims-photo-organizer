@@ -449,6 +449,10 @@ REVIEW_UI_HTML = r"""<!doctype html>
     };
     const applySnapshot = (payload) => {
       if (!payload) return;
+      if (payload.type === "error") {
+        setStatus(payload.message || "自动刷新暂时失败，正在继续重试。");
+        return;
+      }
       if (payload.progress) renderProgress(payload.progress);
       if (payload.log) renderLog(payload.log);
       if (!state.batchId) loadBatches().catch(() => {});
@@ -478,9 +482,14 @@ REVIEW_UI_HTML = r"""<!doctype html>
         const video = document.createElement("video");
         video.className = "preview";
         video.src = asset.media_url;
-        video.controls = true;
+        video.muted = true;
+        video.playsInline = true;
         video.preload = "metadata";
-        video.addEventListener("click", () => openPreview(asset));
+        video.addEventListener("click", (event) => {
+          event.preventDefault();
+          video.pause();
+          openPreview(asset);
+        });
         return video;
       }
       const img = document.createElement("img");
@@ -494,7 +503,13 @@ REVIEW_UI_HTML = r"""<!doctype html>
       img.addEventListener("click", () => openPreview(asset));
       return img;
     };
+    const pauseInlinePreviews = () => {
+      document.querySelectorAll("video.preview").forEach((video) => {
+        video.pause();
+      });
+    };
     const openPreview = (asset) => {
+      pauseInlinePreviews();
       const modal = el("preview-modal");
       const content = el("preview-modal-content");
       content.replaceChildren();
