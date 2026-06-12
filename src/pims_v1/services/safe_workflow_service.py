@@ -7,7 +7,7 @@ from pims_v1.config import settings
 from pims_v1.models.asset import Asset
 from pims_v1.models.processing import ProcessingTask
 from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
-from pims_v1.services.notification_service import send_wechat_text_message
+from pims_v1.services.notification_service import notify_duplicate_approval_needed
 from pims_v1.services.operation_plan_service import create_duplicate_quarantine_plan
 from pims_v1.services.phash_index_service import IMAGE_SUFFIXES
 from pims_v1.services.series_index_service import build_series_candidates
@@ -95,23 +95,18 @@ def _build_thumbnails(session: Session, cache_root: str | Path, limit: int) -> d
     return summary
 
 
-def _notify_duplicate_plan_if_needed(duplicate_plan: dict[str, int]) -> dict[str, int]:
+def _notify_duplicate_plan_if_needed(session: Session, duplicate_plan: dict[str, int]) -> dict[str, int]:
     if duplicate_plan.get("operations", 0) <= 0 or not settings.wechat_webhook_url:
-        return {"sent": 0, "failed": 0}
+        return {"sent": 0, "failed": 0, "skipped": 0}
 
     batch_id = duplicate_plan["batch_id"]
     operations = duplicate_plan["operations"]
-    content = (
-        "PIMS 照片整理提醒\n"
-        f"有新的重复文件隔离批次需要批量审批：批次 #{batch_id}\n"
-        f"待审批操作数：{operations}\n"
-        "请打开审核页查看“已存在位置”和“重复位置”，确认无误后再批量确认。"
+    return notify_duplicate_approval_needed(
+        session=session,
+        webhook_url=settings.wechat_webhook_url,
+        batch_id=batch_id,
+        operations=operations,
     )
-    try:
-        send_wechat_text_message(settings.wechat_webhook_url, content)
-    except Exception:
-        return {"sent": 0, "failed": 1}
-    return {"sent": 1, "failed": 0}
 
 
 def run_safe_workflow(
@@ -148,7 +143,7 @@ def run_safe_workflow(
     duplicate_plan = {"batch_id": 0, "operations": 0}
     if keep_root:
         duplicate_plan = create_duplicate_quarantine_plan(session=session, keep_root=keep_root)
-    notification = _notify_duplicate_plan_if_needed(duplicate_plan)
+    notification = _notify_duplicate_plan_if_needed(session, duplicate_plan)
 
     return {
         "recovered": recovered,

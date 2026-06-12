@@ -1,6 +1,7 @@
 from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
+from pims_v1.models.notification import NotificationRecord
 from pims_v1.models.operation import Operation, OperationBatch
 from pims_v1.models.processing import ProcessingTask, ScanRun
 from pims_v1.models.review import ReviewItem
@@ -12,6 +13,7 @@ __all__ = [
     "DuplicateGroup",
     "DuplicateGroupAsset",
     "Library",
+    "NotificationRecord",
     "Operation",
     "OperationBatch",
     "ProcessingTask",

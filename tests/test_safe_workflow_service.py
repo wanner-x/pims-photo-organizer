@@ -83,11 +83,11 @@ def test_run_safe_workflow_notifies_when_duplicate_plan_needs_approval(tmp_path,
 
     notifications = []
 
-    def fake_send_message(webhook_url: str, content: str) -> dict[str, int | str]:
-        notifications.append({"webhook_url": webhook_url, "content": content})
-        return {"ok": 1}
+    def fake_notify(**kwargs) -> dict[str, int]:
+        notifications.append(kwargs)
+        return {"sent": 1, "failed": 0, "skipped": 0}
 
-    monkeypatch.setattr("pims_v1.services.safe_workflow_service.send_wechat_text_message", fake_send_message)
+    monkeypatch.setattr("pims_v1.services.safe_workflow_service.notify_duplicate_approval_needed", fake_notify)
     monkeypatch.setattr(
         "pims_v1.services.safe_workflow_service.settings.wechat_webhook_url",
         "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
@@ -140,10 +140,10 @@ def test_run_safe_workflow_notifies_when_duplicate_plan_needs_approval(tmp_path,
     )
 
     assert summary["duplicate_plan"]["operations"] == 1
-    assert summary["notification"] == {"sent": 1, "failed": 0}
+    assert summary["notification"] == {"sent": 1, "failed": 0, "skipped": 0}
     assert len(notifications) == 1
-    assert "需要批量审批" in notifications[0]["content"]
-    assert "批次" in notifications[0]["content"]
+    assert notifications[0]["batch_id"] == summary["duplicate_plan"]["batch_id"]
+    assert notifications[0]["operations"] == 1
 
 
 def test_run_safe_workflow_only_enqueues_images_for_phash(tmp_path):

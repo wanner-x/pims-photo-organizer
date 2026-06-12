@@ -2,7 +2,7 @@ from sqlalchemy import inspect
 from sqlalchemy import create_engine
 
 from pims_v1.db import Base
-from pims_v1.models import asset, duplicate, library, operation, processing, review, series
+from pims_v1.models import asset, duplicate, library, notification, operation, processing, review, series
 
 
 def test_core_tables_exist(tmp_path):
@@ -19,6 +19,7 @@ def test_core_tables_exist(tmp_path):
     assert "review_items" in table_names
     assert "processing_tasks" in table_names
     assert "operation_batches" in table_names
+    assert "notification_records" in table_names
     assert "duplicate_groups" in table_names
     assert "similar_groups" in table_names
     assert "series_candidate_assets" in table_names
