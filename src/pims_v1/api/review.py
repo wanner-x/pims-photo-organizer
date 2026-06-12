@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from pims_v1.config import settings
-from pims_v1.db import Base, SessionLocal, engine
+from pims_v1.db import SessionLocal, ensure_database_schema, engine
 from pims_v1.services.ai_naming_service import suggest_series_organization
 from pims_v1.services.deepseek_client import DeepSeekClient
 from pims_v1.services.review_service import (
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/review", tags=["review"])
 
 
 def get_session() -> Generator[Session]:
-    Base.metadata.create_all(bind=engine)
+    ensure_database_schema(engine)
     session = SessionLocal()
     try:
         yield session

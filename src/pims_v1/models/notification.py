@@ -10,6 +10,14 @@ class NotificationRecord(Base):
     __tablename__ = "notification_records"
     __table_args__ = (
         Index("ix_notification_records_channel_event", "channel", "event_type"),
+        Index(
+            "ux_notification_records_subject_once",
+            "channel",
+            "event_type",
+            "subject_type",
+            "subject_id",
+            unique=True,
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

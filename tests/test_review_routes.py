@@ -218,6 +218,9 @@ def test_review_ui_page_exists():
     assert "批量生成 AI 建议" in response.text
     assert "批量确认并移动" in response.text
     assert "selectedSeriesIds" in response.text
+    assert "withButtonLoading" in response.text
+    assert "series-busy" in response.text
+    assert "aria-busy" in response.text
 
 
 def test_review_ui_inline_video_preview_does_not_show_player_controls():

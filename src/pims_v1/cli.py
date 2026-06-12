@@ -6,7 +6,7 @@ from time import perf_counter
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from pims_v1.db import Base
+from pims_v1.db import ensure_database_schema
 from pims_v1.config import settings
 from pims_v1 import models
 from pims_v1.services.ai_naming_service import suggest_series_title
@@ -193,7 +193,7 @@ def run_index_library(
     database_url: str,
 ) -> int:
     engine = create_engine(database_url, future=True)
-    Base.metadata.create_all(bind=engine)
+    ensure_database_schema(engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     session = session_factory()
     try:
@@ -217,7 +217,7 @@ def run_index_library(
 
 def make_session(database_url: str):
     engine = create_engine(database_url, future=True)
-    Base.metadata.create_all(bind=engine)
+    ensure_database_schema(engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     return session_factory()
 

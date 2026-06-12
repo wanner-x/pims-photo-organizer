@@ -83,6 +83,19 @@ REVIEW_UI_HTML = r"""<!doctype html>
       font-weight: 700;
       transition: transform .12s ease, box-shadow .12s ease;
     }
+    button[aria-busy="true"]::after {
+      content: "";
+      display: inline-block;
+      width: .8em;
+      height: .8em;
+      margin-left: .5em;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 999px;
+      vertical-align: -0.1em;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     button:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(22, 143, 159, .14); }
     button:disabled { cursor: not-allowed; opacity: .48; transform: none; box-shadow: none; }
     button.primary {
@@ -165,6 +178,9 @@ REVIEW_UI_HTML = r"""<!doctype html>
       outline: 3px solid rgba(66, 184, 131, .22);
       background: #fbfffd;
     }
+    .series-card[aria-busy="true"] {
+      outline: 3px solid rgba(22, 143, 159, .18);
+    }
     .series-card strong {
       overflow-wrap: anywhere;
     }
@@ -202,6 +218,13 @@ REVIEW_UI_HTML = r"""<!doctype html>
       border: 1px solid var(--line);
       background: #e6f4ef;
     }
+    .series-busy {
+      min-height: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .series-busy.error { color: var(--danger); font-weight: 700; }
     .metric {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -498,6 +521,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
       <button id="clear-series-selection">清空选择</button>
       <button class="warn" id="batch-suggest-series">批量生成 AI 建议</button>
       <button class="primary" id="batch-confirm-series">批量确认并移动</button>
+      <span id="series-bulk-status" class="series-busy" aria-live="polite"></span>
     </div>
     <div id="series-list" class="series-list">
       <div class="empty">系列候选加载中...</div>
@@ -550,6 +574,34 @@ REVIEW_UI_HTML = r"""<!doctype html>
       return token ? {"x-pims-api-token": token} : {};
     };
     const setStatus = (message) => { el("status").textContent = message; };
+    const setBulkStatus = (message, isError = false) => {
+      const node = el("series-bulk-status");
+      node.textContent = message || "";
+      node.classList.toggle("error", isError);
+    };
+    const setSeriesCardBusy = (candidateId, message = "", isError = false) => {
+      const node = document.querySelector(`.series-card[data-candidate-id="${candidateId}"]`);
+      if (!node) return;
+      node.setAttribute("aria-busy", message && !isError ? "true" : "false");
+      const busy = node.querySelector('[data-role="busy"]');
+      if (!busy) return;
+      busy.textContent = message;
+      busy.classList.toggle("error", isError);
+    };
+    const withButtonLoading = async (button, loadingText, work) => {
+      if (!button || button.disabled) return;
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      button.textContent = loadingText;
+      try {
+        return await work();
+      } finally {
+        button.textContent = originalText;
+        button.removeAttribute("aria-busy");
+        button.disabled = false;
+      }
+    };
     const jsonFetch = async (url, options = {}) => {
       const response = await fetch(url, {
         ...options,
@@ -644,7 +696,9 @@ REVIEW_UI_HTML = r"""<!doctype html>
             <button data-action="suggest">AI 生成分类/命名</button>
             <button class="primary" data-action="confirm" ${suggestion.id ? "" : "disabled"}>确认并移动到 NAS</button>
           </div>
+          <div class="series-busy" data-role="busy" aria-live="polite"></div>
         `;
+        node.setAttribute("aria-busy", "false");
         const checkbox = node.querySelector('[data-action="select"]');
         checkbox.checked = state.selectedSeriesIds.has(candidate.id);
         checkbox.addEventListener("change", () => {
@@ -665,8 +719,18 @@ REVIEW_UI_HTML = r"""<!doctype html>
           return img;
         });
         assetBox.replaceChildren(...previews);
-        node.querySelector('[data-action="suggest"]').addEventListener("click", () => suggestSeries(candidate.id));
-        node.querySelector('[data-action="confirm"]').addEventListener("click", () => confirmSeries(candidate, node));
+        node.querySelector('[data-action="suggest"]').addEventListener("click", (event) => {
+          withButtonLoading(event.currentTarget, "AI 生成中...", () => suggestSeries(candidate.id)).catch((error) => {
+            setSeriesCardBusy(candidate.id, `AI 建议失败：${error.message}`, true);
+            setStatus(`AI 建议失败：${error.message}`);
+          });
+        });
+        node.querySelector('[data-action="confirm"]').addEventListener("click", (event) => {
+          withButtonLoading(event.currentTarget, "移动中...", () => confirmSeries(candidate, node)).catch((error) => {
+            setSeriesCardBusy(candidate.id, `确认移动失败：${error.message}`, true);
+            setStatus(`确认移动失败：${error.message}`);
+          });
+        });
         return node;
       }));
       updateSeriesSelectionCount();
@@ -815,9 +879,11 @@ REVIEW_UI_HTML = r"""<!doctype html>
     };
     const suggestSeries = async (candidateId) => {
       setStatus(`正在为候选 #${candidateId} 生成 AI 分类/命名...`);
+      setSeriesCardBusy(candidateId, "正在调用 AI 生成分类/命名，请稍候...");
       await jsonFetch(`/review/series/${candidateId}/suggest-ai`, {method: "POST", auth: true});
       await loadSeries();
       setStatus(`候选 #${candidateId} 的 AI 建议已生成，请审核后确认。`);
+      setBulkStatus("");
     };
     const selectedSeries = () => state.series.filter((candidate) => state.selectedSeriesIds.has(candidate.id));
     const selectVisibleSeries = () => {
@@ -832,22 +898,30 @@ REVIEW_UI_HTML = r"""<!doctype html>
       const targets = selectedSeries();
       if (!targets.length) {
         setStatus("请先选择要生成 AI 建议的系列。");
+        setBulkStatus("请先勾选要生成 AI 建议的系列。", true);
         return;
       }
       if (!confirm(`批量为 ${fmt(targets.length)} 个系列生成 AI 分类/命名建议？`)) return;
+      setBulkStatus(`正在批量生成 AI 建议：0 / ${fmt(targets.length)}`);
       let success = 0;
       let failed = 0;
       for (const candidate of targets) {
         try {
+          setSeriesCardBusy(candidate.id, "正在生成 AI 建议...");
           await jsonFetch(`/review/series/${candidate.id}/suggest-ai`, {method: "POST", auth: true});
           success += 1;
           setStatus(`批量 AI 建议进度：成功 ${fmt(success)}，失败 ${fmt(failed)}。`);
+          setBulkStatus(`批量 AI 建议进度：成功 ${fmt(success)}，失败 ${fmt(failed)}，共 ${fmt(targets.length)}。`);
+          setSeriesCardBusy(candidate.id, "AI 建议已生成。");
         } catch (error) {
           failed += 1;
+          setSeriesCardBusy(candidate.id, `AI 建议失败：${error.message}`, true);
+          setBulkStatus(`批量 AI 建议进度：成功 ${fmt(success)}，失败 ${fmt(failed)}，共 ${fmt(targets.length)}。`, failed > 0);
         }
       }
       await loadSeries();
       setStatus(`批量 AI 建议完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。`);
+      setBulkStatus(`批量 AI 建议完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。`, failed > 0);
     };
     const confirmSeries = async (candidate, node) => {
       const suggestion = candidate.suggestion || {};
@@ -856,9 +930,11 @@ REVIEW_UI_HTML = r"""<!doctype html>
       const category = node.querySelector('[data-field="category"]').value.trim();
       if (!title || !category) {
         setStatus("确认前请填写系列标题和分类。");
+        setSeriesCardBusy(candidate.id, "确认前请填写系列标题和分类。", true);
         return;
       }
       if (!confirm(`确认候选 #${candidate.id}？系统会移动 ${fmt(candidate.asset_count)} 个文件到 NAS：${category}/${title}`)) return;
+      setSeriesCardBusy(candidate.id, "正在移动文件到 NAS...");
       const result = await jsonFetch(`/review/series-suggestions/${suggestion.id}/confirm`, {
         method: "POST",
         auth: true,
@@ -867,15 +943,18 @@ REVIEW_UI_HTML = r"""<!doctype html>
       });
       await Promise.all([loadSeries(), loadProgress()]);
       setStatus(`系列已确认并移动到 NAS：成功 ${fmt(result.moved)}，失败 ${fmt(result.failed)}。`);
+      setBulkStatus("");
     };
     const batchConfirmSeries = async () => {
       const targets = selectedSeries().filter((candidate) => candidate.suggestion?.id);
       if (!targets.length) {
         setStatus("请选择已有 AI 建议的系列再批量确认。");
+        setBulkStatus("请选择已有 AI 建议的系列再批量确认。", true);
         return;
       }
       const totalAssets = targets.reduce((sum, candidate) => sum + (candidate.asset_count || 0), 0);
       if (!confirm(`批量确认 ${fmt(targets.length)} 个系列，并移动约 ${fmt(totalAssets)} 个文件到 NAS？`)) return;
+      setBulkStatus(`正在批量确认并移动：0 / ${fmt(targets.length)}`);
       let success = 0;
       let failed = 0;
       for (const candidate of targets) {
@@ -883,6 +962,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
         const title = node?.querySelector('[data-field="title"]')?.value.trim() || candidate.suggestion.title;
         const category = node?.querySelector('[data-field="category"]')?.value.trim() || candidate.suggestion.category;
         try {
+          setSeriesCardBusy(candidate.id, "正在确认并移动到 NAS...");
           await jsonFetch(`/review/series-suggestions/${candidate.suggestion.id}/confirm`, {
             method: "POST",
             auth: true,
@@ -892,12 +972,17 @@ REVIEW_UI_HTML = r"""<!doctype html>
           state.selectedSeriesIds.delete(candidate.id);
           success += 1;
           setStatus(`批量确认进度：成功 ${fmt(success)}，失败 ${fmt(failed)}。`);
+          setBulkStatus(`批量确认进度：成功 ${fmt(success)}，失败 ${fmt(failed)}，共 ${fmt(targets.length)}。`);
+          setSeriesCardBusy(candidate.id, "已确认并移动。");
         } catch (error) {
           failed += 1;
+          setSeriesCardBusy(candidate.id, `确认移动失败：${error.message}`, true);
+          setBulkStatus(`批量确认进度：成功 ${fmt(success)}，失败 ${fmt(failed)}，共 ${fmt(targets.length)}。`, true);
         }
       }
       await Promise.all([loadSeries(), loadProgress()]);
       setStatus(`批量确认并移动完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。`);
+      setBulkStatus(`批量确认并移动完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。`, failed > 0);
     };
     const selectBatch = async (batchId) => {
       state.batchId = batchId;
@@ -953,8 +1038,18 @@ REVIEW_UI_HTML = r"""<!doctype html>
     el("refresh-series").addEventListener("click", () => loadSeries().catch((error) => setStatus(`系列加载失败：${error.message}`)));
     el("select-visible-series").addEventListener("click", selectVisibleSeries);
     el("clear-series-selection").addEventListener("click", clearSeriesSelection);
-    el("batch-suggest-series").addEventListener("click", () => batchSuggestSeries().catch((error) => setStatus(`批量 AI 建议失败：${error.message}`)));
-    el("batch-confirm-series").addEventListener("click", () => batchConfirmSeries().catch((error) => setStatus(`批量确认失败：${error.message}`)));
+    el("batch-suggest-series").addEventListener("click", (event) => {
+      withButtonLoading(event.currentTarget, "批量生成中...", batchSuggestSeries).catch((error) => {
+        setBulkStatus(`批量 AI 建议失败：${error.message}`, true);
+        setStatus(`批量 AI 建议失败：${error.message}`);
+      });
+    });
+    el("batch-confirm-series").addEventListener("click", (event) => {
+      withButtonLoading(event.currentTarget, "批量移动中...", batchConfirmSeries).catch((error) => {
+        setBulkStatus(`批量确认失败：${error.message}`, true);
+        setStatus(`批量确认失败：${error.message}`);
+      });
+    });
     el("refresh-log").addEventListener("click", () => loadLog().catch((error) => setStatus(`日志加载失败：${error.message}`)));
     el("status-filter").addEventListener("change", () => {
       state.offset = 0;

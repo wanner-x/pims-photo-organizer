@@ -14,7 +14,7 @@ from pims_v1.api.review import router as review_router
 from pims_v1.api.review_ui import router as review_ui_router
 from pims_v1.api.tasks import router as tasks_router
 from pims_v1.config import settings
-from pims_v1.db import Base, SessionLocal, engine
+from pims_v1.db import SessionLocal, ensure_database_schema, engine
 from pims_v1.models.asset import Asset
 from pims_v1.services.log_service import latest_log_tail
 from pims_v1.services.progress_service import review_progress_summary
@@ -29,7 +29,7 @@ app.include_router(progress_router)
 
 
 def get_session() -> Generator[Session]:
-    Base.metadata.create_all(bind=engine)
+    ensure_database_schema(engine)
     session = SessionLocal()
     try:
         yield session
