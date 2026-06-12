@@ -65,6 +65,16 @@ pims list-tasks
 pims status
 ```
 
+Open the local review page:
+
+```powershell
+uvicorn pims_v1.main:app --host 127.0.0.1 --port 8000
+```
+
+Then browse to `http://127.0.0.1:8000/review-ui`.
+
+The review page can list duplicate quarantine batches, show cached thumbnails, exclude planned operations, and confirm a batch. It intentionally does not execute quarantine moves; run `pims execute-batch <batch_id>` separately only after reviewing and confirming.
+
 Exclude a planned operation when needed through the API:
 
 ```powershell

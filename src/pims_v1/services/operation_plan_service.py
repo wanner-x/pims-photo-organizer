@@ -137,6 +137,66 @@ def list_operation_batches(session: Session) -> list[dict[str, int | str | None]
     ]
 
 
+def _operation_asset_payload(asset: Asset | None) -> dict[str, int | str | None] | None:
+    if asset is None:
+        return None
+    return {
+        "id": asset.id,
+        "file_name": asset.file_name,
+        "current_path": asset.current_path or asset.original_path,
+        "file_size": asset.file_size,
+        "hash_md5": asset.hash_md5,
+        "hash_phash": asset.hash_phash,
+        "thumbnail_url": f"/thumbnails/{asset.id}.jpg",
+    }
+
+
+def list_batch_operations(
+    session: Session,
+    batch_id: int,
+    *,
+    status: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
+) -> list[dict[str, int | str | None | dict[str, int | str | None]]]:
+    query = (
+        session.query(Operation)
+        .filter(Operation.batch_id == batch_id)
+        .order_by(Operation.id)
+    )
+    if status is not None:
+        query = query.filter(Operation.status == status)
+
+    operations = query.offset(offset).limit(limit).all()
+    result = []
+    for operation in operations:
+        asset = session.get(Asset, operation.asset_id) if operation.asset_id is not None else None
+        result.append(
+            {
+                "id": operation.id,
+                "batch_id": operation.batch_id,
+                "operation_type": operation.operation_type,
+                "status": operation.status,
+                "from_path": operation.from_path,
+                "to_path": operation.to_path,
+                "asset": _operation_asset_payload(asset),
+            }
+        )
+    return result
+
+
+def count_batch_operations(
+    session: Session,
+    batch_id: int,
+    *,
+    status: str | None = None,
+) -> int:
+    query = session.query(Operation).filter(Operation.batch_id == batch_id)
+    if status is not None:
+        query = query.filter(Operation.status == status)
+    return query.count()
+
+
 def execute_confirmed_batch(
     session: Session,
     batch_id: int,

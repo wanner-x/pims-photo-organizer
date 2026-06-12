@@ -7,8 +7,10 @@ from pims_v1.config import settings
 from pims_v1.db import Base, SessionLocal, engine
 from pims_v1.services.operation_plan_service import (
     confirm_operation_batch,
+    count_batch_operations,
     exclude_operation,
     execute_confirmed_batch,
+    list_batch_operations,
     list_operation_batches,
 )
 
@@ -32,6 +34,33 @@ def require_api_token(x_pims_api_token: str | None = Header(default=None)) -> No
 @router.get("/batches")
 def list_batches(session: Session = Depends(get_session)) -> dict[str, list]:
     return {"items": list_operation_batches(session)}
+
+
+@router.get("/batches/{batch_id}/operations")
+def list_operations_for_batch(
+    batch_id: int,
+    status: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    operations = list_batch_operations(
+        session=session,
+        batch_id=batch_id,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "items": operations,
+        "total": count_batch_operations(
+            session=session,
+            batch_id=batch_id,
+            status=status,
+        ),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.post("/batches/{batch_id}/confirm")

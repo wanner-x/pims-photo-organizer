@@ -194,6 +194,112 @@ def test_operations_api_excludes_planned_operation(tmp_path):
     assert response.json() == {"operation_id": operation_id, "status": "excluded"}
 
 
+def test_review_ui_page_exists():
+    client = TestClient(app)
+
+    response = client.get("/review-ui")
+
+    assert response.status_code == 200
+    assert "PIMS Review" in response.text
+    assert "待确认隔离批次" in response.text
+
+
+def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path="/library/a.jpg",
+        current_path="/library/a.jpg",
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=123,
+        mtime=1.0,
+        hash_md5="same",
+    )
+    session.add(asset_row)
+    session.flush()
+    batch = OperationBatch(batch_type="duplicate_quarantine", status="planned")
+    session.add(batch)
+    session.flush()
+    operation = Operation(
+        batch_id=batch.id,
+        operation_type="quarantine_duplicate",
+        asset_id=asset_row.id,
+        from_path="/library/a.jpg",
+        status="planned",
+    )
+    session.add(operation)
+    session.commit()
+    batch_id = batch.id
+    operation_id = operation.id
+    asset_id = asset_row.id
+    session.close()
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.get(f"/operations/batches/{batch_id}/operations")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["limit"] == 200
+    assert payload["offset"] == 0
+    assert payload["items"] == [
+        {
+            "id": operation_id,
+            "batch_id": batch_id,
+            "operation_type": "quarantine_duplicate",
+            "status": "planned",
+            "from_path": "/library/a.jpg",
+            "to_path": None,
+            "asset": {
+                "id": asset_id,
+                "file_name": "a.jpg",
+                "current_path": "/library/a.jpg",
+                "file_size": 123,
+                "hash_md5": "same",
+                "hash_phash": None,
+                "thumbnail_url": f"/thumbnails/{asset_id}.jpg",
+            },
+        }
+    ]
+
+
+def test_thumbnail_route_serves_cached_thumbnail(tmp_path):
+    thumbnail_dir = tmp_path / ".cache" / "thumbnails"
+    thumbnail_dir.mkdir(parents=True)
+    (thumbnail_dir / "7.jpg").write_bytes(b"jpeg")
+
+    import pims_v1.main as main_module
+
+    old_cache_root = main_module.settings.cache_root
+    main_module.settings.cache_root = str(tmp_path / ".cache")
+    try:
+        client = TestClient(app)
+        response = client.get("/thumbnails/7.jpg")
+    finally:
+        main_module.settings.cache_root = old_cache_root
+
+    assert response.status_code == 200
+    assert response.content == b"jpeg"
+
+
 def test_review_api_lists_exact_duplicate_groups(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
     Base.metadata.create_all(bind=engine)
