@@ -1,7 +1,8 @@
+import asyncio
 from pathlib import Path
 from collections.abc import Generator
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -15,6 +16,8 @@ from pims_v1.api.tasks import router as tasks_router
 from pims_v1.config import settings
 from pims_v1.db import Base, SessionLocal, engine
 from pims_v1.models.asset import Asset
+from pims_v1.services.log_service import latest_log_tail
+from pims_v1.services.progress_service import review_progress_summary
 
 app = FastAPI(title="PIMS V1")
 app.include_router(libraries_router)
@@ -56,3 +59,26 @@ def media_asset(asset_id: int, session: Session = Depends(get_session)) -> FileR
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Media file not found")
     return FileResponse(path)
+
+
+def _progress_snapshot() -> dict[str, object]:
+    session = SessionLocal()
+    try:
+        return {
+            "type": "snapshot",
+            "progress": review_progress_summary(session),
+            "log": latest_log_tail(settings.logs_root, lines=80),
+        }
+    finally:
+        session.close()
+
+
+@app.websocket("/ws/progress")
+async def progress_websocket(websocket: WebSocket) -> None:
+    await websocket.accept()
+    try:
+        while True:
+            await websocket.send_json(_progress_snapshot())
+            await asyncio.sleep(5)
+    except WebSocketDisconnect:
+        return

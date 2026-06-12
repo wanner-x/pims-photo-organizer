@@ -210,20 +210,69 @@ REVIEW_UI_HTML = r"""<!doctype html>
     }
     .op-top {
       display: grid;
-      grid-template-columns: 170px 1fr;
+      grid-template-columns: minmax(180px, 32%) 1fr;
       gap: 14px;
       align-items: start;
     }
     .preview {
-      width: 170px;
-      height: 140px;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      min-height: 150px;
+      max-height: 320px;
       border-radius: 18px;
-      object-fit: cover;
+      object-fit: contain;
       background: linear-gradient(135deg, #dff3ee, #edf8ff);
       border: 1px solid var(--line);
       overflow: hidden;
+      cursor: zoom-in;
     }
     video.preview { background: #102522; }
+    .preview-shell {
+      position: relative;
+      display: grid;
+      align-items: center;
+      min-width: 0;
+    }
+    .preview-hint {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      color: white;
+      background: rgba(22, 49, 46, .68);
+      font-size: 12px;
+      pointer-events: none;
+    }
+    .preview-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: clamp(12px, 4vw, 40px);
+      background: rgba(9, 28, 25, .82);
+      backdrop-filter: blur(10px);
+    }
+    .preview-modal.open { display: flex; }
+    .preview-modal img,
+    .preview-modal video {
+      max-width: min(96vw, 1600px);
+      max-height: 88vh;
+      border-radius: 18px;
+      background: #071b18;
+      box-shadow: 0 30px 90px rgba(0, 0, 0, .38);
+      object-fit: contain;
+    }
+    .preview-modal button {
+      position: fixed;
+      right: 22px;
+      top: 18px;
+      color: white;
+      background: rgba(255, 255, 255, .18);
+      border-color: rgba(255, 255, 255, .28);
+    }
     .path {
       font-family: Consolas, "Cascadia Mono", monospace;
       font-size: 13px;
@@ -263,13 +312,12 @@ REVIEW_UI_HTML = r"""<!doctype html>
     @media (max-width: 960px) {
       .hero, main { grid-template-columns: 1fr; }
       .progress-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
-      .op-top { grid-template-columns: 120px 1fr; }
-      .preview { width: 120px; height: 104px; }
+      .op-top { grid-template-columns: minmax(160px, 38%) 1fr; }
     }
     @media (max-width: 560px) {
       .progress-grid { grid-template-columns: 1fr; }
       .op-top { grid-template-columns: 1fr; }
-      .preview { width: 100%; height: 210px; }
+      .preview { width: 100%; min-height: 220px; }
     }
   </style>
 </head>
@@ -351,6 +399,10 @@ REVIEW_UI_HTML = r"""<!doctype html>
       <div class="notice" id="status">等待操作。</div>
     </section>
   </main>
+  <div id="preview-modal" class="preview-modal" aria-hidden="true">
+    <button id="close-preview" type="button">关闭预览</button>
+    <div id="preview-modal-content"></div>
+  </div>
   <script>
     const state = { batches: [], batchId: null, offset: 0, limit: 100, total: 0 };
     const videoExts = new Set([".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"]);
@@ -395,6 +447,12 @@ REVIEW_UI_HTML = r"""<!doctype html>
       }
       el("log-tail").textContent = [`日志：${payload.name}`, ...(payload.lines || [])].join("\n");
     };
+    const applySnapshot = (payload) => {
+      if (!payload) return;
+      if (payload.progress) renderProgress(payload.progress);
+      if (payload.log) renderLog(payload.log);
+      if (!state.batchId) loadBatches().catch(() => {});
+    };
     const renderBatches = () => {
       el("batch-count").textContent = `${fmt(state.batches.length)} 个批次`;
       if (!state.batches.length) {
@@ -422,6 +480,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
         video.src = asset.media_url;
         video.controls = true;
         video.preload = "metadata";
+        video.addEventListener("click", () => openPreview(asset));
         return video;
       }
       const img = document.createElement("img");
@@ -432,7 +491,34 @@ REVIEW_UI_HTML = r"""<!doctype html>
         if (imageExts.has(ext) && img.src !== asset.media_url) img.src = asset.media_url;
         else img.style.visibility = "hidden";
       };
+      img.addEventListener("click", () => openPreview(asset));
       return img;
+    };
+    const openPreview = (asset) => {
+      const modal = el("preview-modal");
+      const content = el("preview-modal-content");
+      content.replaceChildren();
+      const ext = (asset.file_ext || "").toLowerCase();
+      if (videoExts.has(ext)) {
+        const video = document.createElement("video");
+        video.src = asset.media_url;
+        video.controls = true;
+        video.autoplay = true;
+        content.append(video);
+      } else {
+        const img = document.createElement("img");
+        img.alt = asset.file_name || "预览";
+        img.src = asset.media_url || asset.thumbnail_url;
+        content.append(img);
+      }
+      modal.classList.add("open");
+      modal.setAttribute("aria-hidden", "false");
+    };
+    const closePreview = () => {
+      const modal = el("preview-modal");
+      el("preview-modal-content").replaceChildren();
+      modal.classList.remove("open");
+      modal.setAttribute("aria-hidden", "true");
     };
     const copyCard = (copy) => {
       const node = document.createElement("div");
@@ -459,7 +545,13 @@ REVIEW_UI_HTML = r"""<!doctype html>
         node.className = "op";
         const top = document.createElement("div");
         top.className = "op-top";
+        const previewShell = document.createElement("div");
+        previewShell.className = "preview-shell";
         const preview = makePreview(asset);
+        const hint = document.createElement("div");
+        hint.className = "preview-hint";
+        hint.textContent = "点开预览";
+        previewShell.append(preview, hint);
         const body = document.createElement("div");
         body.innerHTML = `
           <div><span class="pill">操作 #${operation.id}</span><span class="pill">${operation.status}</span><span class="pill">${operation.operation_type}</span></div>
@@ -475,7 +567,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
           exclude.addEventListener("click", () => excludeOperation(operation.id));
           actions.append(exclude);
         }
-        top.append(preview, body);
+        top.append(previewShell, body);
         const copies = document.createElement("div");
         copies.className = "copy-list";
         const duplicateAssets = operation.duplicate_assets || [];
@@ -561,7 +653,33 @@ REVIEW_UI_HTML = r"""<!doctype html>
     el("prev-page").addEventListener("click", () => movePage(-1));
     el("next-page").addEventListener("click", () => movePage(1));
     el("confirm-batch").addEventListener("click", confirmBatch);
+    el("close-preview").addEventListener("click", closePreview);
+    el("preview-modal").addEventListener("click", (event) => {
+      if (event.target === el("preview-modal")) closePreview();
+    });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closePreview();
+    });
+    const connectProgressSocket = () => {
+      if (!("WebSocket" in window)) return;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const socket = new WebSocket(`${protocol}//${window.location.host}/ws/progress`);
+      socket.addEventListener("message", (event) => {
+        try {
+          applySnapshot(JSON.parse(event.data));
+        } catch (error) {
+          setStatus(`自动刷新数据解析失败：${error.message}`);
+        }
+      });
+      socket.addEventListener("open", () => setStatus("已连接自动刷新。"));
+      socket.addEventListener("close", () => {
+        setStatus("自动刷新断开，5 秒后重连。");
+        setTimeout(connectProgressSocket, 5000);
+      });
+      socket.addEventListener("error", () => socket.close());
+    };
     refreshAll().catch((error) => setStatus(`加载失败：${error.message}`));
+    connectProgressSocket();
   </script>
 </body>
 </html>

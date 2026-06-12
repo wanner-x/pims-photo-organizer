@@ -208,6 +208,9 @@ def test_review_ui_page_exists():
     assert "整理进度" in response.text
     assert "已存在位置" in response.text
     assert "重复位置" in response.text
+    assert "/ws/progress" in response.text
+    assert "preview-modal" in response.text
+    assert "openPreview" in response.text
 
 
 def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):

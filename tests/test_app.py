@@ -10,3 +10,14 @@ def test_healthcheck_returns_ok():
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_progress_websocket_sends_snapshot():
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/progress") as websocket:
+        payload = websocket.receive_json()
+
+    assert payload["type"] == "snapshot"
+    assert "progress" in payload
+    assert "log" in payload
