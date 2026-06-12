@@ -24,13 +24,18 @@ $LogPath = Join-Path $LogDir "full-detection-$RunStamp.log"
 function Write-RunLog {
     param([string]$Message)
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message"
-    $line | Tee-Object -FilePath $LogPath -Append
+    Write-Output $line
+    Add-Content -Path $LogPath -Value $line -Encoding UTF8
 }
 
 function Invoke-Pims {
     param([string[]]$Arguments)
     Write-RunLog "> python -m pims_v1.cli $($Arguments -join ' ')"
-    & $Python -m pims_v1.cli @Arguments 2>&1 | Tee-Object -FilePath $LogPath -Append
+    & $Python -m pims_v1.cli @Arguments 2>&1 | ForEach-Object {
+        $line = $_.ToString()
+        Write-Output $line
+        Add-Content -Path $LogPath -Value $line -Encoding UTF8
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Command failed with exit code ${LASTEXITCODE}: $($Arguments -join ' ')"
     }

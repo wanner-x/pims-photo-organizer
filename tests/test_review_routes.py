@@ -480,6 +480,24 @@ def test_progress_latest_log_api_returns_tail_lines(tmp_path):
     }
 
 
+def test_progress_latest_log_api_reads_utf16_powershell_logs(tmp_path):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log_file = log_dir / "full-detection-20260612-030000.log"
+    log_file.write_text("进度一\nprogress.hash_md5.seen=100\n", encoding="utf-16")
+
+    old_logs_root = progress_api.settings.logs_root
+    progress_api.settings.logs_root = str(log_dir)
+    try:
+        client = TestClient(app)
+        response = client.get("/progress/logs/latest", params={"lines": 1})
+    finally:
+        progress_api.settings.logs_root = old_logs_root
+
+    assert response.status_code == 200
+    assert response.json()["lines"] == ["progress.hash_md5.seen=100"]
+
+
 def test_review_api_lists_exact_duplicate_groups(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
     Base.metadata.create_all(bind=engine)
