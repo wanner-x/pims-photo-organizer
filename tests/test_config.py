@@ -37,3 +37,15 @@ def test_settings_accept_keep_root():
     settings = Settings(keep_root="\\\\192.168.31.10\\personal_folder\\网络写真集")
 
     assert settings.keep_root.endswith("网络写真集")
+
+
+def test_settings_load_bom_env_file_keep_root(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "PIMS_KEEP_ROOT=\\\\192.168.31.10\\personal_folder\\网络写真集\n",
+        encoding="utf-8-sig",
+    )
+
+    settings = Settings(_env_file=env_file)
+
+    assert settings.keep_root == "\\\\192.168.31.10\\personal_folder\\网络写真集"

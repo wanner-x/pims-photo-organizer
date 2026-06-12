@@ -444,11 +444,10 @@ REVIEW_UI_HTML = r"""<!doctype html>
       .series-assets { grid-template-columns: repeat(3, 1fr); }
       .series-assets img:nth-child(n+7) { display: none; }
       .series-bulk-bar {
-        position: fixed;
-        left: 12px;
-        right: 12px;
-        bottom: 12px;
+        position: sticky;
+        top: 74px;
         z-index: 45;
+        margin: 10px;
         border: 1px solid var(--line);
         border-radius: 22px;
         background: rgba(247, 252, 249, .96);
@@ -457,7 +456,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
       .series-bulk-bar .meta { width: 100%; }
       .series-bulk-bar button { flex: 1 1 130px; }
       .batch-list, .op-list { padding: 10px; }
-      body { padding-bottom: 126px; }
+      body { padding-bottom: 28px; }
     }
   </style>
 </head>
@@ -905,6 +904,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
       setBulkStatus(`正在批量生成 AI 建议：0 / ${fmt(targets.length)}`);
       let success = 0;
       let failed = 0;
+      let firstError = "";
       for (const candidate of targets) {
         try {
           setSeriesCardBusy(candidate.id, "正在生成 AI 建议...");
@@ -915,13 +915,15 @@ REVIEW_UI_HTML = r"""<!doctype html>
           setSeriesCardBusy(candidate.id, "AI 建议已生成。");
         } catch (error) {
           failed += 1;
+          if (!firstError) firstError = error.message;
           setSeriesCardBusy(candidate.id, `AI 建议失败：${error.message}`, true);
           setBulkStatus(`批量 AI 建议进度：成功 ${fmt(success)}，失败 ${fmt(failed)}，共 ${fmt(targets.length)}。`, failed > 0);
         }
       }
       await loadSeries();
-      setStatus(`批量 AI 建议完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。`);
-      setBulkStatus(`批量 AI 建议完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。`, failed > 0);
+      const errorHint = firstError ? ` 首个错误：${firstError}` : "";
+      setStatus(`批量 AI 建议完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。${errorHint}`);
+      setBulkStatus(`批量 AI 建议完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。${errorHint}`, failed > 0);
     };
     const confirmSeries = async (candidate, node) => {
       const suggestion = candidate.suggestion || {};
@@ -957,6 +959,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
       setBulkStatus(`正在批量确认并移动：0 / ${fmt(targets.length)}`);
       let success = 0;
       let failed = 0;
+      let firstError = "";
       for (const candidate of targets) {
         const node = document.querySelector(`.series-card[data-candidate-id="${candidate.id}"]`);
         const title = node?.querySelector('[data-field="title"]')?.value.trim() || candidate.suggestion.title;
@@ -976,13 +979,15 @@ REVIEW_UI_HTML = r"""<!doctype html>
           setSeriesCardBusy(candidate.id, "已确认并移动。");
         } catch (error) {
           failed += 1;
+          if (!firstError) firstError = error.message;
           setSeriesCardBusy(candidate.id, `确认移动失败：${error.message}`, true);
           setBulkStatus(`批量确认进度：成功 ${fmt(success)}，失败 ${fmt(failed)}，共 ${fmt(targets.length)}。`, true);
         }
       }
       await Promise.all([loadSeries(), loadProgress()]);
-      setStatus(`批量确认并移动完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。`);
-      setBulkStatus(`批量确认并移动完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。`, failed > 0);
+      const errorHint = firstError ? ` 首个错误：${firstError}` : "";
+      setStatus(`批量确认并移动完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。${errorHint}`);
+      setBulkStatus(`批量确认并移动完成：成功 ${fmt(success)}，失败 ${fmt(failed)}。${errorHint}`, failed > 0);
     };
     const selectBatch = async (batchId) => {
       state.batchId = batchId;

@@ -221,6 +221,7 @@ def test_review_ui_page_exists():
     assert "withButtonLoading" in response.text
     assert "series-busy" in response.text
     assert "aria-busy" in response.text
+    assert "首个错误" in response.text
 
 
 def test_review_ui_inline_video_preview_does_not_show_player_controls():
@@ -252,7 +253,8 @@ def test_review_ui_includes_mobile_adaptation_rules():
     assert response.status_code == 200
     assert "@media (max-width: 720px)" in response.text
     assert "position: sticky" in response.text
-    assert "position: fixed" in response.text
+    assert "top: 74px" in response.text
+    assert "bottom: 12px" not in response.text
     assert "grid-template-columns: 1fr" in response.text
     assert "overflow-x: hidden" in response.text
 
