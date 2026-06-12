@@ -18,7 +18,9 @@ def test_settings_accept_deepseek_api_key():
 
     assert settings.deepseek_api_key == "test-key"
     assert settings.deepseek_base_url == "https://api.deepseek.com"
-    assert settings.deepseek_model == "deepseek-chat"
+    assert settings.deepseek_model == "deepseek-v4-pro"
+    assert settings.deepseek_reasoning_effort == "high"
+    assert settings.deepseek_thinking_enabled is True
 
 
 def test_settings_accept_wechat_webhook_url():

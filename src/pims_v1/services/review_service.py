@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -63,6 +65,8 @@ def list_series_review_candidates(
     query = session.query(SeriesCandidate).order_by(SeriesCandidate.id)
     if status:
         query = query.filter(SeriesCandidate.status == status)
+    else:
+        query = query.filter(SeriesCandidate.status.notin_(("confirmed",)))
     candidates = query.limit(limit).all()
     result = []
     for candidate in candidates:
@@ -91,6 +95,9 @@ def list_series_review_candidates(
                     "id": suggestion.id,
                     "title": suggestion.suggested_title,
                     "category": suggestion.suggested_category,
+                    "archive_path": suggestion.suggested_archive_path,
+                    "plan_summary": suggestion.plan_summary,
+                    "risk_flags": json.loads(suggestion.risk_flags or "[]"),
                     "confidence": suggestion.confidence,
                     "status": suggestion.status,
                 },

@@ -205,6 +205,18 @@ REVIEW_UI_HTML = r"""<!doctype html>
       grid-template-columns: 1fr 1fr;
       gap: 8px;
     }
+    .series-plan {
+      display: grid;
+      gap: 5px;
+      padding: 10px 12px;
+      border: 1px dashed var(--line);
+      border-radius: 16px;
+      background: rgba(247, 252, 249, .76);
+      color: var(--muted);
+      overflow-wrap: anywhere;
+      font-size: 13px;
+    }
+    .series-plan strong { color: var(--ink); }
     .series-assets {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
@@ -691,6 +703,11 @@ REVIEW_UI_HTML = r"""<!doctype html>
             <input data-field="title" placeholder="系列标题" value="">
             <input data-field="category" placeholder="分类，例如 写真合集" value="">
           </div>
+          <div class="series-plan">
+            <div><strong>目标路径：</strong><span data-role="archive-path">等待 AI 建议</span></div>
+            <div><strong>计划：</strong><span data-role="plan-summary">-</span></div>
+            <div><strong>风险：</strong><span data-role="risk-flags">-</span></div>
+          </div>
           <div class="actions">
             <button data-action="suggest">AI 生成分类/命名</button>
             <button class="primary" data-action="confirm" ${suggestion.id ? "" : "disabled"}>确认并移动到 NAS</button>
@@ -709,6 +726,9 @@ REVIEW_UI_HTML = r"""<!doctype html>
         node.querySelector(".meta").textContent = candidate.source_root || "";
         node.querySelector('[data-field="title"]').value = suggestion.title || candidate.title || "";
         node.querySelector('[data-field="category"]').value = suggestion.category || "";
+        node.querySelector('[data-role="archive-path"]').textContent = suggestion.archive_path || "等待 AI 建议";
+        node.querySelector('[data-role="plan-summary"]').textContent = suggestion.plan_summary || "-";
+        node.querySelector('[data-role="risk-flags"]').textContent = (suggestion.risk_flags || []).join("；") || "未标记风险";
         const assetBox = node.querySelector(".series-assets");
         const previews = (candidate.assets || []).slice(0, 8).map((asset) => {
           const img = document.createElement("img");
@@ -944,7 +964,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
         body: JSON.stringify({title, category}),
       });
       await Promise.all([loadSeries(), loadProgress()]);
-      setStatus(`系列已确认并移动到 NAS：成功 ${fmt(result.moved)}，失败 ${fmt(result.failed)}。`);
+      setStatus(`系列已确认并移动到 NAS：成功 ${fmt(result.moved)}，失败 ${fmt(result.failed)}。目标：${result.archive_path || "-"}`);
       setBulkStatus("");
     };
     const batchConfirmSeries = async () => {
@@ -966,7 +986,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
         const category = node?.querySelector('[data-field="category"]')?.value.trim() || candidate.suggestion.category;
         try {
           setSeriesCardBusy(candidate.id, "正在确认并移动到 NAS...");
-          await jsonFetch(`/review/series-suggestions/${candidate.suggestion.id}/confirm`, {
+          const result = await jsonFetch(`/review/series-suggestions/${candidate.suggestion.id}/confirm`, {
             method: "POST",
             auth: true,
             headers: {"Content-Type": "application/json"},
@@ -975,7 +995,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
           state.selectedSeriesIds.delete(candidate.id);
           success += 1;
           setStatus(`批量确认进度：成功 ${fmt(success)}，失败 ${fmt(failed)}。`);
-          setBulkStatus(`批量确认进度：成功 ${fmt(success)}，失败 ${fmt(failed)}，共 ${fmt(targets.length)}。`);
+          setBulkStatus(`批量确认进度：成功 ${fmt(success)}，失败 ${fmt(failed)}，共 ${fmt(targets.length)}。最新目标：${result.archive_path || "-"}`);
           setSeriesCardBusy(candidate.id, "已确认并移动。");
         } catch (error) {
           failed += 1;

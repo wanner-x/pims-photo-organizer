@@ -29,7 +29,11 @@ class FakeOrganizationClient:
 
     def chat(self, messages):
         self.messages = messages
-        return '{"title":"清晨海边写真","category":"写真合集","confidence":0.82}'
+        return (
+            '{"title":"清晨海边写真","category":"写真合集","confidence":0.82,'
+            '"plan_summary":"移动到 NAS 写真合集目录并保留原文件名",'
+            '"risk_flags":["目标目录可能已存在"]}'
+        )
 
 
 def make_session(tmp_path):
@@ -87,12 +91,17 @@ def test_build_series_organization_prompt_requests_reviewable_json():
     prompt = build_series_organization_prompt(
         source_root="/library/model-a/set-01",
         file_names=["001.jpg", "002.jpg"],
+        archive_root="/nas/archive",
+        existing_archive_dirs=["写真合集/旧系列"],
     )
 
     assert "set-01" in prompt
     assert "001.jpg" in prompt
     assert "title" in prompt
     assert "category" in prompt
+    assert "archive_path" in prompt
+    assert "/nas/archive" in prompt
+    assert "写真合集/旧系列" in prompt
 
 
 def test_suggest_series_organization_creates_review_suggestion(tmp_path):
@@ -118,7 +127,12 @@ def test_suggest_series_organization_creates_review_suggestion(tmp_path):
     session.commit()
     client = FakeOrganizationClient()
 
-    result = suggest_series_organization(session=session, candidate_id=candidate.id, client=client)
+    result = suggest_series_organization(
+        session=session,
+        candidate_id=candidate.id,
+        client=client,
+        archive_root="/nas/archive",
+    )
 
     suggestion = session.query(SeriesSuggestion).one()
     session.refresh(candidate)
@@ -127,10 +141,16 @@ def test_suggest_series_organization_creates_review_suggestion(tmp_path):
         "suggestion_id": suggestion.id,
         "title": "清晨海边写真",
         "category": "写真合集",
+        "archive_path": "/nas/archive/写真合集/清晨海边写真",
+        "plan_summary": "移动到 NAS 写真合集目录并保留原文件名",
+        "risk_flags": ["目标目录可能已存在"],
         "confidence": 0.82,
     }
     assert suggestion.status == "pending_review"
     assert suggestion.suggested_title == "清晨海边写真"
     assert suggestion.suggested_category == "写真合集"
+    assert suggestion.suggested_archive_path == "/nas/archive/写真合集/清晨海边写真"
+    assert suggestion.plan_summary == "移动到 NAS 写真合集目录并保留原文件名"
+    assert suggestion.risk_flags == '["目标目录可能已存在"]'
     assert candidate.status == "ai_suggested"
     assert candidate.title == "清晨海边写真"

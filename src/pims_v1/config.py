@@ -17,7 +17,9 @@ class Settings(BaseSettings):
     api_token: str | None = None
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-pro"
+    deepseek_reasoning_effort: str = "high"
+    deepseek_thinking_enabled: bool = True
     wechat_webhook_url: str | None = None
     review_url: str = "http://127.0.0.1:8000/review-ui"
 

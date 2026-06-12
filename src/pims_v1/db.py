@@ -12,6 +12,16 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, futu
 def ensure_database_schema(bind=engine) -> None:
     Base.metadata.create_all(bind=bind)
     with bind.begin() as connection:
+        existing_series_suggestion_columns = {
+            row[1] for row in connection.exec_driver_sql("PRAGMA table_info(series_suggestions)").fetchall()
+        }
+        for column_name, column_type in {
+            "suggested_archive_path": "VARCHAR(2048)",
+            "plan_summary": "TEXT",
+            "risk_flags": "TEXT",
+        }.items():
+            if column_name not in existing_series_suggestion_columns:
+                connection.exec_driver_sql(f"ALTER TABLE series_suggestions ADD COLUMN {column_name} {column_type}")
         connection.exec_driver_sql(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_notification_records_subject_once

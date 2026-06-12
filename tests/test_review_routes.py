@@ -222,6 +222,9 @@ def test_review_ui_page_exists():
     assert "series-busy" in response.text
     assert "aria-busy" in response.text
     assert "首个错误" in response.text
+    assert "目标路径" in response.text
+    assert "plan-summary" in response.text
+    assert "risk-flags" in response.text
 
 
 def test_review_ui_inline_video_preview_does_not_show_player_controls():
@@ -642,7 +645,10 @@ def test_review_series_suggest_ai_api_creates_pending_suggestion(tmp_path, monke
             pass
 
         def chat(self, messages):
-            return '{"title":"清晨写真","category":"写真合集","confidence":0.7}'
+            return (
+                '{"title":"清晨写真","category":"写真合集","confidence":0.7,'
+                '"plan_summary":"移动到 NAS 归档目录","risk_flags":["人工复核"]}'
+            )
 
     def override_get_session():
         test_session = session_factory()
@@ -654,6 +660,7 @@ def test_review_series_suggest_ai_api_creates_pending_suggestion(tmp_path, monke
     app.dependency_overrides[get_review_session] = override_get_session
     monkeypatch.setattr("pims_v1.api.review.DeepSeekClient", FakeClient)
     monkeypatch.setattr("pims_v1.api.review.settings.deepseek_api_key", "test-key")
+    monkeypatch.setattr("pims_v1.api.review.settings.keep_root", str(tmp_path / "nas"))
     try:
         client = TestClient(app)
         response = client.post(f"/review/series/{candidate_id}/suggest-ai")
@@ -662,6 +669,9 @@ def test_review_series_suggest_ai_api_creates_pending_suggestion(tmp_path, monke
 
     assert response.status_code == 200
     assert response.json()["title"] == "清晨写真"
+    assert response.json()["archive_path"].endswith("写真合集\\清晨写真") or response.json()["archive_path"].endswith("写真合集/清晨写真")
+    assert response.json()["plan_summary"] == "移动到 NAS 归档目录"
+    assert response.json()["risk_flags"] == ["人工复核"]
     session = session_factory()
     assert session.query(SeriesSuggestion).one().status == "pending_review"
 

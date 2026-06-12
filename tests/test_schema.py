@@ -49,3 +49,13 @@ def test_ensure_database_schema_creates_notification_business_unique_index(tmp_p
     indexes = inspector.get_indexes("notification_records")
 
     assert any(index["name"] == "ux_notification_records_subject_once" and index.get("unique") for index in indexes)
+
+
+def test_ensure_database_schema_adds_series_suggestion_plan_columns(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'schema.db'}", future=True)
+
+    ensure_database_schema(engine)
+    inspector = inspect(engine)
+    column_names = {column["name"] for column in inspector.get_columns("series_suggestions")}
+
+    assert {"suggested_archive_path", "plan_summary", "risk_flags"}.issubset(column_names)

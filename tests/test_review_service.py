@@ -101,6 +101,9 @@ def test_list_series_review_candidates_includes_suggestion_and_sample_assets(tmp
         candidate_id=candidate.id,
         suggested_title="清晨写真",
         suggested_category="写真合集",
+        suggested_archive_path="/nas/写真合集/清晨写真",
+        plan_summary="移动到 NAS 目标目录",
+        risk_flags='["目标目录已存在"]',
         confidence=0.8,
         status="pending_review",
     )
@@ -120,6 +123,9 @@ def test_list_series_review_candidates_includes_suggestion_and_sample_assets(tmp
                 "id": suggestion.id,
                 "title": "清晨写真",
                 "category": "写真合集",
+                "archive_path": "/nas/写真合集/清晨写真",
+                "plan_summary": "移动到 NAS 目标目录",
+                "risk_flags": ["目标目录已存在"],
                 "confidence": 0.8,
                 "status": "pending_review",
             },
@@ -136,6 +142,35 @@ def test_list_series_review_candidates_includes_suggestion_and_sample_assets(tmp
             ],
         }
     ]
+
+
+def test_list_series_review_candidates_hides_confirmed_by_default(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root="/library/set1",
+        title="set1",
+        status="confirmed",
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(
+        SeriesSuggestion(
+            candidate_id=candidate.id,
+            suggested_title="清晨写真",
+            suggested_category="写真合集",
+            confidence=0.8,
+            status="confirmed",
+        )
+    )
+    session.commit()
+
+    candidates = list_series_review_candidates(session, limit=10)
+
+    assert candidates == []
 
 
 def test_list_exact_duplicate_groups_returns_member_assets(tmp_path):

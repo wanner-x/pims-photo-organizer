@@ -1,3 +1,5 @@
+import json
+
 import httpx
 
 from pims_v1.services.deepseek_client import DeepSeekClient
@@ -26,7 +28,9 @@ def test_deepseek_client_sends_chat_request_and_returns_content():
     client = DeepSeekClient(
         api_key="secret",
         base_url="https://api.deepseek.test",
-        model="deepseek-chat",
+        model="deepseek-v4-pro",
+        thinking_enabled=True,
+        reasoning_effort="high",
         transport=httpx.MockTransport(handler),
     )
 
@@ -35,7 +39,11 @@ def test_deepseek_client_sends_chat_request_and_returns_content():
     assert content == "海边白裙写真"
     assert captured["authorization"] == "Bearer secret"
     assert captured["path"] == "/chat/completions"
-    assert "deepseek-chat" in captured["payload"]
+    payload = json.loads(captured["payload"])
+    assert payload["model"] == "deepseek-v4-pro"
+    assert payload["reasoning_effort"] == "high"
+    assert payload["thinking"] == {"type": "enabled"}
+    assert "temperature" not in payload
 
 
 def test_deepseek_client_requires_api_key():

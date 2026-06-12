@@ -88,8 +88,15 @@ def suggest_series_ai(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
             model=settings.deepseek_model,
+            reasoning_effort=settings.deepseek_reasoning_effort,
+            thinking_enabled=settings.deepseek_thinking_enabled,
         )
-        return suggest_series_organization(session=session, candidate_id=candidate_id, client=client)
+        return suggest_series_organization(
+            session=session,
+            candidate_id=candidate_id,
+            client=client,
+            archive_root=settings.keep_root,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -167,6 +167,7 @@ def confirm_series_suggestion(
     candidate.confidence = max(candidate.confidence, suggestion.confidence, 0.9 if failed == 0 else 0.0)
     suggestion.suggested_title = final_title
     suggestion.suggested_category = final_category
+    suggestion.suggested_archive_path = str(archive_dir)
     suggestion.status = "confirmed" if failed == 0 else "failed"
     series.status = "confirmed" if failed == 0 else "failed"
     session.commit()
