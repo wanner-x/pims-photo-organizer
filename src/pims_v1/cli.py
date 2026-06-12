@@ -22,7 +22,7 @@ from pims_v1.services.operation_plan_service import (
     execute_confirmed_batch,
     list_operation_batches,
 )
-from pims_v1.services.phash_index_service import compute_missing_phash
+from pims_v1.services.phash_index_service import IMAGE_SUFFIXES, compute_missing_phash
 from pims_v1.services.review_service import list_series_candidates
 from pims_v1.services.safe_workflow_service import run_safe_workflow
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
@@ -514,6 +514,7 @@ def run_enqueue_phash_tasks(limit: int | None, database_url: str) -> int:
         query = (
             session.query(models.Asset)
             .filter(models.Asset.hash_phash.is_(None))
+            .filter(models.Asset.file_ext.in_(sorted(IMAGE_SUFFIXES)))
             .order_by(models.Asset.id)
         )
         if limit is not None:

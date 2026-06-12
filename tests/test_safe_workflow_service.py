@@ -76,3 +76,55 @@ def test_run_safe_workflow_builds_candidates_and_duplicate_plan(tmp_path):
     assert session.query(DuplicateGroup).count() == 1
     assert session.query(SeriesCandidate).count() == 2
     assert session.query(Operation).one().from_path == str(local_file)
+
+
+def test_run_safe_workflow_only_enqueues_images_for_phash(tmp_path):
+    from PIL import Image
+
+    session = make_session(tmp_path)
+    root = tmp_path / "library"
+    root.mkdir()
+    image_file = root / "a.jpg"
+    video_file = root / "clip.mp4"
+    Image.new("RGB", (16, 16), color="white").save(image_file)
+    video_file.write_bytes(b"video")
+    library_row = Library(name="Photos", kind="local", root_path=str(root))
+    session.add(library_row)
+    session.flush()
+    session.add_all(
+        [
+            Asset(
+                library_id=library_row.id,
+                original_path=str(image_file),
+                current_path=str(image_file),
+                file_name="a.jpg",
+                file_ext=".jpg",
+                file_size=image_file.stat().st_size,
+                mtime=1.0,
+            ),
+            Asset(
+                library_id=library_row.id,
+                original_path=str(video_file),
+                current_path=str(video_file),
+                file_name="clip.mp4",
+                file_ext=".mp4",
+                file_size=video_file.stat().st_size,
+                mtime=1.0,
+            ),
+        ]
+    )
+    session.commit()
+
+    summary = run_safe_workflow(
+        session=session,
+        keep_root=None,
+        cache_root=tmp_path / ".cache",
+        md5_limit=10,
+        phash_limit=10,
+        thumbnail_limit=10,
+        min_series_assets=1,
+    )
+
+    assert summary["phash_enqueued"]["queued"] == 1
+    assert summary["phash"]["processed"] == 1
+    assert summary["phash"]["skipped_non_image"] == 0

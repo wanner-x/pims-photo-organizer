@@ -5,6 +5,7 @@ from pims_v1.models.asset import Asset
 from pims_v1.models.operation import Operation, OperationBatch
 from pims_v1.models.processing import ProcessingTask
 from pims_v1.models.review import ReviewItem
+from pims_v1.services.phash_index_service import IMAGE_SUFFIXES
 
 
 def _percent(done: int, total: int) -> float:
@@ -16,6 +17,7 @@ def _percent(done: int, total: int) -> float:
 def review_progress_summary(session: Session) -> dict[str, object]:
     total_assets = session.query(Asset).count()
     md5_done = session.query(Asset).filter(Asset.hash_md5.is_not(None)).count()
+    phash_total = session.query(Asset).filter(Asset.file_ext.in_(sorted(IMAGE_SUFFIXES))).count()
     phash_done = session.query(Asset).filter(Asset.hash_phash.is_not(None)).count()
 
     task_rows = (
@@ -52,7 +54,8 @@ def review_progress_summary(session: Session) -> dict[str, object]:
             "md5_done": md5_done,
             "md5_percent": _percent(md5_done, total_assets),
             "phash_done": phash_done,
-            "phash_percent": _percent(phash_done, total_assets),
+            "phash_total": phash_total,
+            "phash_percent": _percent(phash_done, phash_total),
         },
         "reviews": {
             "pending": session.query(ReviewItem).filter(ReviewItem.status == "pending").count(),

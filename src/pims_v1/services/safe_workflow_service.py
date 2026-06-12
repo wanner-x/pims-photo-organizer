@@ -6,6 +6,7 @@ from pims_v1.models.asset import Asset
 from pims_v1.models.processing import ProcessingTask
 from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
 from pims_v1.services.operation_plan_service import create_duplicate_quarantine_plan
+from pims_v1.services.phash_index_service import IMAGE_SUFFIXES
 from pims_v1.services.series_index_service import build_series_candidates
 from pims_v1.services.similar_index_service import build_similar_image_reviews
 from pims_v1.services.task_service import enqueue_task, recover_stale_tasks
@@ -28,6 +29,32 @@ def _enqueue_hash_tasks(session: Session, task_type: str, hash_column, limit: in
             .first()
         )
         enqueue_task(session, task_type, "asset", asset.id)
+        if existing is None:
+            queued += 1
+    return queued
+
+
+def _enqueue_phash_tasks(session: Session, limit: int) -> int:
+    query = (
+        session.query(Asset)
+        .filter(Asset.hash_phash.is_(None))
+        .filter(Asset.file_ext.in_(sorted(IMAGE_SUFFIXES)))
+        .order_by(Asset.id)
+        .limit(limit)
+    )
+    queued = 0
+    for asset in query.all():
+        existing = (
+            session.query(ProcessingTask.id)
+            .filter(
+                ProcessingTask.task_type == "hash_phash",
+                ProcessingTask.subject_type == "asset",
+                ProcessingTask.subject_id == asset.id,
+                ProcessingTask.status.in_(("pending", "running")),
+            )
+            .first()
+        )
+        enqueue_task(session, "hash_phash", "asset", asset.id)
         if existing is None:
             queued += 1
     return queued
@@ -66,7 +93,7 @@ def run_safe_workflow(
     md5_queued = _enqueue_hash_tasks(session, "hash_md5", Asset.hash_md5, md5_limit)
     md5 = process_md5_tasks(session=session, limit=md5_limit)
     duplicates = build_exact_duplicate_reviews(session=session)
-    phash_queued = _enqueue_hash_tasks(session, "hash_phash", Asset.hash_phash, phash_limit)
+    phash_queued = _enqueue_phash_tasks(session, phash_limit)
     phash = process_phash_tasks(session=session, limit=phash_limit)
     similar = build_similar_image_reviews(session=session, threshold=similar_threshold)
     series = build_series_candidates(session=session, min_assets=min_series_assets)

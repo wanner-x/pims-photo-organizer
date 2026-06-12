@@ -418,10 +418,10 @@ def test_progress_summary_api_reports_overall_progress(tmp_path):
             ),
             Asset(
                 library_id=library_row.id,
-                original_path="/library/b.jpg",
-                current_path="/library/b.jpg",
-                file_name="b.jpg",
-                file_ext=".jpg",
+                original_path="/library/b.mp4",
+                current_path="/library/b.mp4",
+                file_name="b.mp4",
+                file_ext=".mp4",
                 file_size=1,
                 mtime=1.0,
             ),
@@ -450,7 +450,8 @@ def test_progress_summary_api_reports_overall_progress(tmp_path):
         "md5_done": 1,
         "md5_percent": 50.0,
         "phash_done": 1,
-        "phash_percent": 50.0,
+        "phash_total": 1,
+        "phash_percent": 100.0,
     }
 
 

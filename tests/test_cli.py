@@ -583,6 +583,46 @@ def test_phash_task_cli_enqueue_and_process(tmp_path, capsys, monkeypatch):
     assert session.get(Asset, asset_id).hash_phash is not None
 
 
+def test_phash_task_cli_enqueue_skips_video_assets(tmp_path, capsys, monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "phash-video.db"
+    database_url = f"sqlite:///{db_path}"
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"video")
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Videos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    session.add(
+        Asset(
+            library_id=library_row.id,
+            original_path=str(source),
+            current_path=str(source),
+            file_name="clip.mp4",
+            file_ext=".mp4",
+            file_size=source.stat().st_size,
+            mtime=1.0,
+        )
+    )
+    session.commit()
+    session.close()
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["pims", "enqueue-phash-tasks", "--database-url", database_url],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "queued=0" in output
+
+
 def test_build_thumbnails_cli_creates_cached_thumbnail(tmp_path, capsys, monkeypatch):
     from PIL import Image
     from sqlalchemy import create_engine
