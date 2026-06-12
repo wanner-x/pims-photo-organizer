@@ -38,6 +38,20 @@ def _reserve_notification(
     subject_type: str,
     subject_id: int,
 ) -> NotificationRecord | None:
+    existing_for_subject = (
+        session.query(NotificationRecord)
+        .filter(
+            NotificationRecord.channel == channel,
+            NotificationRecord.event_type == event_type,
+            NotificationRecord.subject_type == subject_type,
+            NotificationRecord.subject_id == subject_id,
+            NotificationRecord.status != "failed",
+        )
+        .first()
+    )
+    if existing_for_subject is not None:
+        return None
+
     existing = session.query(NotificationRecord).filter(NotificationRecord.dedupe_key == dedupe_key).one_or_none()
     if existing and existing.status != "failed":
         return None
@@ -75,6 +89,7 @@ def notify_duplicate_approval_needed(
     webhook_url: str,
     batch_id: int,
     operations: int,
+    review_url: str = "http://127.0.0.1:8000/review-ui",
     sender: WechatSender = send_wechat_text_message,
 ) -> dict[str, int]:
     dedupe_key = f"wechat:duplicate_quarantine:{batch_id}"
@@ -90,10 +105,12 @@ def notify_duplicate_approval_needed(
         return {"sent": 0, "failed": 0, "skipped": 1}
 
     content = (
-        "PIMS 照片整理提醒\n"
-        f"有新的重复文件隔离批次需要批量审批：批次 #{batch_id}\n"
-        f"待审批操作数：{operations}\n"
-        "请打开审核页查看“已存在位置”和“重复位置”，确认无误后再批量确认。"
+        "PIMS 照片整理待审核\n"
+        f"批次 #{batch_id}：发现 {operations} 个疑似重复文件待审核。\n"
+        "系统不会自动删除文件；确认后才会把重复副本移动到隔离区。\n"
+        "请在审核页对比“已存在位置”和“重复位置”，确认无误后再批量处理。\n"
+        f"审核入口：{review_url}\n"
+        "如果该批次已经处理，可以忽略本提醒。"
     )
     try:
         sender(webhook_url, content)

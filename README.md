@@ -25,6 +25,7 @@ PIMS_QUARANTINE_ROOT=./data/.quarantine
 PIMS_API_TOKEN=<long-random-token>
 PIMS_DEEPSEEK_API_KEY=<optional>
 PIMS_WECHAT_WEBHOOK_URL=<optional enterprise wechat bot webhook>
+PIMS_REVIEW_URL=http://127.0.0.1:8000/review-ui
 ```
 
 Run the API bound to localhost unless you have a reverse proxy with authentication:

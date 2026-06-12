@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
     wechat_webhook_url: str | None = None
+    review_url: str = "http://127.0.0.1:8000/review-ui"
 
 
 settings = Settings()

@@ -106,6 +106,7 @@ def _notify_duplicate_plan_if_needed(session: Session, duplicate_plan: dict[str,
         webhook_url=settings.wechat_webhook_url,
         batch_id=batch_id,
         operations=operations,
+        review_url=settings.review_url,
     )
 
 

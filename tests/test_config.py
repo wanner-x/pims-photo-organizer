@@ -27,6 +27,12 @@ def test_settings_accept_wechat_webhook_url():
     assert settings.wechat_webhook_url.endswith("key=test")
 
 
+def test_settings_accept_review_url():
+    settings = Settings(review_url="http://192.168.31.98:8000/review-ui")
+
+    assert settings.review_url == "http://192.168.31.98:8000/review-ui"
+
+
 def test_settings_accept_keep_root():
     settings = Settings(keep_root="\\\\192.168.31.10\\personal_folder\\网络写真集")
 
