@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 
 from pims_v1.api.operations import get_session
 import pims_v1.api.progress as progress_api
+import pims_v1.api.review as review_api
 from pims_v1.api.review import get_session as get_review_session
 from pims_v1.api.progress import get_session as get_progress_session
 from pims_v1.db import Base
@@ -13,6 +14,7 @@ from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
 from pims_v1.models.operation import Operation, OperationBatch
+from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset, SeriesSuggestion
 
 
 def test_review_routes_exist():
@@ -211,6 +213,8 @@ def test_review_ui_page_exists():
     assert "/ws/progress" in response.text
     assert "preview-modal" in response.text
     assert "openPreview" in response.text
+    assert "AI 系列整理审核" in response.text
+    assert "确认并移动到 NAS" in response.text
 
 
 def test_review_ui_inline_video_preview_does_not_show_player_controls():
@@ -232,6 +236,17 @@ def test_review_ui_handles_progress_socket_error_payload():
     assert response.status_code == 200
     assert 'payload.type === "error"' in response.text
     assert "payload.message" in response.text
+
+
+def test_review_ui_includes_mobile_adaptation_rules():
+    client = TestClient(app)
+
+    response = client.get("/review-ui")
+
+    assert response.status_code == 200
+    assert "@media (max-width: 720px)" in response.text
+    assert "position: sticky" in response.text
+    assert "grid-template-columns: 1fr" in response.text
 
 
 def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
@@ -583,3 +598,121 @@ def test_review_api_lists_exact_duplicate_groups(tmp_path):
     payload = response.json()
     assert payload["items"][0]["id"] == group_id
     assert payload["items"][0]["assets"][0]["thumbnail_url"].startswith("/thumbs/")
+
+
+def test_review_series_suggest_ai_api_creates_pending_suggestion(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path="/library/set/a.jpg",
+        current_path="/library/set/a.jpg",
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(library_id=library_row.id, source_root="/library/set", title="set")
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.commit()
+    candidate_id = candidate.id
+    session.close()
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def chat(self, messages):
+            return '{"title":"清晨写真","category":"写真合集","confidence":0.7}'
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_review_session] = override_get_session
+    monkeypatch.setattr("pims_v1.api.review.DeepSeekClient", FakeClient)
+    monkeypatch.setattr("pims_v1.api.review.settings.deepseek_api_key", "test-key")
+    try:
+        client = TestClient(app)
+        response = client.post(f"/review/series/{candidate_id}/suggest-ai")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "清晨写真"
+    session = session_factory()
+    assert session.query(SeriesSuggestion).one().status == "pending_review"
+
+
+def test_review_series_confirm_suggestion_api_moves_assets_to_keep_root(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    source_root = tmp_path / "pc" / "set"
+    source_root.mkdir(parents=True)
+    source_file = source_root / "a.jpg"
+    source_file.write_bytes(b"image")
+    archive_root = tmp_path / "nas"
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path=str(tmp_path / "pc"))
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(source_file),
+        current_path=str(source_file),
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=source_file.stat().st_size,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(library_id=library_row.id, source_root=str(source_root), title="set")
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.flush()
+    suggestion = SeriesSuggestion(
+        candidate_id=candidate.id,
+        suggested_title="清晨写真",
+        suggested_category="写真合集",
+        confidence=0.8,
+        status="pending_review",
+    )
+    session.add(suggestion)
+    session.commit()
+    suggestion_id = suggestion.id
+    session.close()
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_review_session] = override_get_session
+    monkeypatch.setattr(review_api.settings, "keep_root", str(archive_root))
+    try:
+        client = TestClient(app)
+        response = client.post(f"/review/series-suggestions/{suggestion_id}/confirm")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["moved"] == 1
+    assert not source_file.exists()
+    assert (archive_root / "写真合集" / "清晨写真" / "a.jpg").exists()

@@ -131,6 +131,46 @@ REVIEW_UI_HTML = r"""<!doctype html>
       background: #15312d;
       font: 12px/1.55 Consolas, "Cascadia Mono", monospace;
     }
+    .series-review-panel {
+      margin: 0 clamp(16px, 4vw, 54px) 16px;
+    }
+    .series-list {
+      padding: 14px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 12px;
+    }
+    .series-card {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 14px;
+      background: rgba(255, 255, 255, .76);
+      display: grid;
+      gap: 10px;
+    }
+    .series-card input {
+      min-width: 0;
+      width: 100%;
+      border-radius: 14px;
+    }
+    .series-fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .series-assets {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+    .series-assets img {
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #e6f4ef;
+    }
     .metric {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -319,6 +359,37 @@ REVIEW_UI_HTML = r"""<!doctype html>
       .op-top { grid-template-columns: 1fr; }
       .preview { width: 100%; min-height: 220px; }
     }
+    @media (max-width: 720px) {
+      header { padding: 18px 12px 12px; }
+      main {
+        grid-template-columns: 1fr;
+        padding: 0 12px 26px;
+      }
+      .series-review-panel { margin: 0 12px 14px; }
+      .section-head {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        align-items: flex-start;
+        flex-direction: column;
+        background: rgba(247, 252, 249, .96);
+        backdrop-filter: blur(10px);
+      }
+      .toolbar,
+      .actions {
+        width: 100%;
+      }
+      .toolbar button,
+      .toolbar select,
+      .toolbar input,
+      .actions button {
+        width: 100%;
+      }
+      .series-list { grid-template-columns: 1fr; padding: 10px; }
+      .series-fields { grid-template-columns: 1fr; }
+      .series-assets { grid-template-columns: repeat(3, 1fr); }
+      .batch-list, .op-list { padding: 10px; }
+    }
   </style>
 </head>
 <body>
@@ -367,6 +438,18 @@ REVIEW_UI_HTML = r"""<!doctype html>
       <pre id="log-tail" class="log-tail">日志加载中...</pre>
     </div>
   </header>
+  <section class="series-review-panel">
+    <div class="section-head">
+      <div>
+        <h2>AI 系列整理审核</h2>
+        <div class="meta">AI 只生成分类和命名建议。你确认后，系统会把该系列文件移动到 NAS 归档目录。</div>
+      </div>
+      <button id="refresh-series">刷新系列建议</button>
+    </div>
+    <div id="series-list" class="series-list">
+      <div class="empty">系列候选加载中...</div>
+    </div>
+  </section>
   <main>
     <section>
       <div class="section-head">
@@ -404,7 +487,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
     <div id="preview-modal-content"></div>
   </div>
   <script>
-    const state = { batches: [], batchId: null, offset: 0, limit: 100, total: 0 };
+    const state = { batches: [], batchId: null, offset: 0, limit: 100, total: 0, series: [] };
     const videoExts = new Set([".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"]);
     const imageExts = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"]);
     const el = (id) => document.getElementById(id);
@@ -473,6 +556,50 @@ REVIEW_UI_HTML = r"""<!doctype html>
         `;
         node.querySelector(".meta").textContent = batch.description || "";
         node.addEventListener("click", () => selectBatch(batch.id));
+        return node;
+      }));
+    };
+    const renderSeries = () => {
+      if (!state.series.length) {
+        el("series-list").innerHTML = `<div class="empty">暂无系列候选。后台检测会按文件夹自动生成候选。</div>`;
+        return;
+      }
+      el("series-list").replaceChildren(...state.series.map((candidate) => {
+        const suggestion = candidate.suggestion || {};
+        const node = document.createElement("article");
+        node.className = "series-card";
+        node.innerHTML = `
+          <div>
+            <span class="pill">候选 #${candidate.id}</span>
+            <span class="pill">${candidate.status}</span>
+            <span class="pill">${fmt(candidate.asset_count)} 个文件</span>
+          </div>
+          <strong>${suggestion.title || candidate.title || "待 AI 命名"}</strong>
+          <div class="meta"></div>
+          <div class="series-assets"></div>
+          <div class="series-fields">
+            <input data-field="title" placeholder="系列标题" value="">
+            <input data-field="category" placeholder="分类，例如 写真合集" value="">
+          </div>
+          <div class="actions">
+            <button data-action="suggest">AI 生成分类/命名</button>
+            <button class="primary" data-action="confirm" ${suggestion.id ? "" : "disabled"}>确认并移动到 NAS</button>
+          </div>
+        `;
+        node.querySelector(".meta").textContent = candidate.source_root || "";
+        node.querySelector('[data-field="title"]').value = suggestion.title || candidate.title || "";
+        node.querySelector('[data-field="category"]').value = suggestion.category || "";
+        const assetBox = node.querySelector(".series-assets");
+        const previews = (candidate.assets || []).slice(0, 8).map((asset) => {
+          const img = document.createElement("img");
+          img.alt = asset.file_name || "样例";
+          img.src = asset.thumbnail_url;
+          img.onerror = () => { img.style.visibility = "hidden"; };
+          return img;
+        });
+        assetBox.replaceChildren(...previews);
+        node.querySelector('[data-action="suggest"]').addEventListener("click", () => suggestSeries(candidate.id));
+        node.querySelector('[data-action="confirm"]').addEventListener("click", () => confirmSeries(candidate, node));
         return node;
       }));
     };
@@ -609,6 +736,36 @@ REVIEW_UI_HTML = r"""<!doctype html>
       renderBatches();
       setStatus("批次已加载。");
     };
+    const loadSeries = async () => {
+      const data = await jsonFetch("/review/series?limit=20");
+      state.series = data.items;
+      renderSeries();
+    };
+    const suggestSeries = async (candidateId) => {
+      setStatus(`正在为候选 #${candidateId} 生成 AI 分类/命名...`);
+      await jsonFetch(`/review/series/${candidateId}/suggest-ai`, {method: "POST", auth: true});
+      await loadSeries();
+      setStatus(`候选 #${candidateId} 的 AI 建议已生成，请审核后确认。`);
+    };
+    const confirmSeries = async (candidate, node) => {
+      const suggestion = candidate.suggestion || {};
+      if (!suggestion.id) return;
+      const title = node.querySelector('[data-field="title"]').value.trim();
+      const category = node.querySelector('[data-field="category"]').value.trim();
+      if (!title || !category) {
+        setStatus("确认前请填写系列标题和分类。");
+        return;
+      }
+      if (!confirm(`确认候选 #${candidate.id}？系统会移动 ${fmt(candidate.asset_count)} 个文件到 NAS：${category}/${title}`)) return;
+      const result = await jsonFetch(`/review/series-suggestions/${suggestion.id}/confirm`, {
+        method: "POST",
+        auth: true,
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({title, category}),
+      });
+      await Promise.all([loadSeries(), loadProgress()]);
+      setStatus(`系列已确认并移动到 NAS：成功 ${fmt(result.moved)}，失败 ${fmt(result.failed)}。`);
+    };
     const selectBatch = async (batchId) => {
       state.batchId = batchId;
       state.offset = 0;
@@ -656,10 +813,11 @@ REVIEW_UI_HTML = r"""<!doctype html>
       setStatus(`批次 #${result.batch_id} 已确认 ${fmt(result.operations)} 项。执行隔离仍需命令行单独执行。`);
     };
     const refreshAll = async () => {
-      await Promise.all([loadProgress(), loadBatches(), loadLog()]);
+      await Promise.all([loadProgress(), loadBatches(), loadSeries(), loadLog()]);
       if (state.batchId) await loadOperations();
     };
     el("refresh").addEventListener("click", () => refreshAll().catch((error) => setStatus(`刷新失败：${error.message}`)));
+    el("refresh-series").addEventListener("click", () => loadSeries().catch((error) => setStatus(`系列加载失败：${error.message}`)));
     el("refresh-log").addEventListener("click", () => loadLog().catch((error) => setStatus(`日志加载失败：${error.message}`)));
     el("status-filter").addEventListener("change", () => {
       state.offset = 0;

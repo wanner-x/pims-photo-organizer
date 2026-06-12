@@ -23,3 +23,4 @@ def test_core_tables_exist(tmp_path):
     assert "duplicate_groups" in table_names
     assert "similar_groups" in table_names
     assert "series_candidate_assets" in table_names
+    assert "series_suggestions" in table_names

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.similar import SimilarGroup, SimilarGroupAsset
-from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset
+from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset, SeriesSuggestion
 
 
 def list_series_candidates(session: Session, limit: int = 20) -> list[dict]:
@@ -40,6 +40,64 @@ def list_series_candidates(session: Session, limit: int = 20) -> list[dict]:
         }
         for row in rows
     ]
+
+
+def _series_asset_payload(asset: Asset) -> dict:
+    return {
+        "id": asset.id,
+        "file_name": asset.file_name,
+        "current_path": asset.current_path or asset.original_path,
+        "file_ext": asset.file_ext,
+        "file_size": asset.file_size,
+        "thumbnail_url": f"/thumbnails/{asset.id}.jpg",
+        "media_url": f"/media/assets/{asset.id}",
+    }
+
+
+def list_series_review_candidates(
+    session: Session,
+    limit: int = 20,
+    status: str | None = None,
+    asset_limit: int = 8,
+) -> list[dict]:
+    query = session.query(SeriesCandidate).order_by(SeriesCandidate.id)
+    if status:
+        query = query.filter(SeriesCandidate.status == status)
+    candidates = query.limit(limit).all()
+    result = []
+    for candidate in candidates:
+        asset_rows = (
+            session.query(Asset)
+            .join(SeriesCandidateAsset, SeriesCandidateAsset.asset_id == Asset.id)
+            .filter(SeriesCandidateAsset.candidate_id == candidate.id)
+            .order_by(SeriesCandidateAsset.sort_order, Asset.id)
+            .all()
+        )
+        suggestion = (
+            session.query(SeriesSuggestion)
+            .filter(SeriesSuggestion.candidate_id == candidate.id)
+            .one_or_none()
+        )
+        result.append(
+            {
+                "id": candidate.id,
+                "title": candidate.title,
+                "source_root": candidate.source_root,
+                "asset_count": len(asset_rows),
+                "status": candidate.status,
+                "suggestion": None
+                if suggestion is None
+                else {
+                    "id": suggestion.id,
+                    "title": suggestion.suggested_title,
+                    "category": suggestion.suggested_category,
+                    "confidence": suggestion.confidence,
+                    "status": suggestion.status,
+                },
+                "assets": [_series_asset_payload(asset) for asset in asset_rows[:asset_limit]],
+            }
+        )
+    return result
 
 
 def _asset_payload(asset: Asset, thumbnail_base: str) -> dict:

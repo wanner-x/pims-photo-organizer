@@ -7,9 +7,10 @@ from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
 from pims_v1.models.similar import SimilarGroup, SimilarGroupAsset
-from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset
+from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset, SeriesSuggestion
 from pims_v1.services.review_service import (
     list_exact_duplicate_groups,
+    list_series_review_candidates,
     list_series_candidates,
     list_similar_groups,
 )
@@ -67,6 +68,72 @@ def test_list_series_candidates_returns_counts(tmp_path):
             "source_root": "/library/set1",
             "asset_count": 2,
             "status": "pending",
+        }
+    ]
+
+
+def test_list_series_review_candidates_includes_suggestion_and_sample_assets(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path="/library/set1/a.jpg",
+        current_path="/library/set1/a.jpg",
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root="/library/set1",
+        title="set1",
+        status="ai_suggested",
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id, sort_order=0))
+    suggestion = SeriesSuggestion(
+        candidate_id=candidate.id,
+        suggested_title="清晨写真",
+        suggested_category="写真合集",
+        confidence=0.8,
+        status="pending_review",
+    )
+    session.add(suggestion)
+    session.commit()
+
+    candidates = list_series_review_candidates(session, limit=10)
+
+    assert candidates == [
+        {
+            "id": candidate.id,
+            "title": "set1",
+            "source_root": "/library/set1",
+            "asset_count": 1,
+            "status": "ai_suggested",
+            "suggestion": {
+                "id": suggestion.id,
+                "title": "清晨写真",
+                "category": "写真合集",
+                "confidence": 0.8,
+                "status": "pending_review",
+            },
+            "assets": [
+                {
+                    "id": asset_row.id,
+                    "file_name": "a.jpg",
+                    "current_path": "/library/set1/a.jpg",
+                    "file_ext": ".jpg",
+                    "file_size": 1,
+                    "thumbnail_url": f"/thumbnails/{asset_row.id}.jpg",
+                    "media_url": f"/media/assets/{asset_row.id}",
+                }
+            ],
         }
     ]
 

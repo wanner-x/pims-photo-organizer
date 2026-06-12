@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, func
+from sqlalchemy import DateTime, Float, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pims_v1.models.base import Base
@@ -44,6 +44,25 @@ class Series(Base):
     title: Mapped[str] = mapped_column(String(255))
     archive_path: Mapped[str] = mapped_column(String(2048), unique=True)
     status: Mapped[str] = mapped_column(String(50), default="confirmed")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class SeriesSuggestion(Base):
+    __tablename__ = "series_suggestions"
+    __table_args__ = (Index("ix_series_suggestions_status", "status"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey("series_candidates.id"), unique=True)
+    suggested_title: Mapped[str] = mapped_column(String(255))
+    suggested_category: Mapped[str] = mapped_column(String(255), default="未分类")
+    confidence: Mapped[float] = mapped_column(Float, default=0.6)
+    status: Mapped[str] = mapped_column(String(50), default="pending_review")
+    raw_response: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

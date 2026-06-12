@@ -76,6 +76,8 @@ Then browse to `http://127.0.0.1:8000/review-ui`.
 
 The review page can list duplicate quarantine batches, show overall indexing/hash progress, display background task status and the latest full-detection log tail, display the duplicate path alongside the existing keep-copy path, preview cached image thumbnails or video files, exclude planned operations, and confirm a batch. It intentionally does not execute quarantine moves; run `pims execute-batch <batch_id>` separately only after reviewing and confirming.
 
+The review page can also review AI-generated series organization suggestions. AI suggestions are only proposals until confirmed. After confirmation, PIMS creates a formal series and moves the series files into the NAS archive path under `<PIMS_KEEP_ROOT>/<category>/<title>/`.
+
 When `PIMS_WECHAT_WEBHOOK_URL` is set, `run-safe-workflow` sends an Enterprise WeChat text notification whenever it creates a new duplicate quarantine batch with operations requiring approval.
 
 `run-safe-workflow` prints periodic hash progress lines while it is processing large batches, so long-running PowerShell logs show movement before a full round finishes.
@@ -106,6 +108,6 @@ pims run-safe-workflow --keep-root "\\192.168.31.10\personal_folder\网络写真
 
 ### Current Scope
 
-Implemented: indexing, MD5 duplicates, pHash similarity, series candidates, DeepSeek title suggestions, thumbnails, review APIs, operation planning, batch confirmation, quarantine execution, resumable hash tasks, and SQLite backup.
+Implemented: indexing, MD5 duplicates, pHash similarity, series candidates, DeepSeek title/category suggestions with human review, confirmed series archive moves to NAS, thumbnails, review APIs, operation planning, batch confirmation, quarantine execution, resumable hash tasks, and SQLite backup.
 
 Not implemented: multi-user authentication, role-based authorization, packaged installer/service, and database migrations for non-SQLite deployments.

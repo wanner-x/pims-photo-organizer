@@ -6,7 +6,7 @@ from pims_v1.models.operation import Operation, OperationBatch
 from pims_v1.models.processing import ProcessingTask, ScanRun
 from pims_v1.models.review import ReviewItem
 from pims_v1.models.similar import SimilarGroup, SimilarGroupAsset
-from pims_v1.models.series import Series, SeriesAsset, SeriesCandidate, SeriesCandidateAsset
+from pims_v1.models.series import Series, SeriesAsset, SeriesCandidate, SeriesCandidateAsset, SeriesSuggestion
 
 __all__ = [
     "Asset",
@@ -25,4 +25,5 @@ __all__ = [
     "SeriesAsset",
     "SeriesCandidate",
     "SeriesCandidateAsset",
+    "SeriesSuggestion",
 ]
