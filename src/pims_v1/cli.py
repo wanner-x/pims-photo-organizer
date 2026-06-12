@@ -139,7 +139,7 @@ def build_parser() -> ArgumentParser:
     confirm_series.add_argument("--database-url", default=settings.database_url)
 
     safe_workflow = subparsers.add_parser("run-safe-workflow")
-    safe_workflow.add_argument("--keep-root", default=None)
+    safe_workflow.add_argument("--keep-root", default=settings.keep_root)
     safe_workflow.add_argument("--cache-root", default=settings.cache_root)
     safe_workflow.add_argument("--md5-limit", type=int, default=1000)
     safe_workflow.add_argument("--phash-limit", type=int, default=1000)

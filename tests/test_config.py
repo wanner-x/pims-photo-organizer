@@ -25,3 +25,9 @@ def test_settings_accept_wechat_webhook_url():
     settings = Settings(wechat_webhook_url="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test")
 
     assert settings.wechat_webhook_url.endswith("key=test")
+
+
+def test_settings_accept_keep_root():
+    settings = Settings(keep_root="\\\\192.168.31.10\\personal_folder\\网络写真集")
+
+    assert settings.keep_root.endswith("网络写真集")

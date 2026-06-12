@@ -10,9 +10,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-if ([string]::IsNullOrWhiteSpace($KeepRoot)) {
-    throw "KeepRoot is required."
-}
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $RepoRoot
 
@@ -20,12 +17,18 @@ $LogDir = Join-Path $RepoRoot "data\logs"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $RunStamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $LogPath = Join-Path $LogDir "full-detection-$RunStamp.log"
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+function Add-RunLogLine {
+    param([string]$Line)
+    [System.IO.File]::AppendAllText($LogPath, $Line + [Environment]::NewLine, $Utf8NoBom)
+}
 
 function Write-RunLog {
     param([string]$Message)
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message"
     Write-Output $line
-    Add-Content -Path $LogPath -Value $line -Encoding UTF8
+    Add-RunLogLine $line
 }
 
 function Invoke-Pims {
@@ -34,7 +37,7 @@ function Invoke-Pims {
     & $Python -m pims_v1.cli @Arguments 2>&1 | ForEach-Object {
         $line = $_.ToString()
         Write-Output $line
-        Add-Content -Path $LogPath -Value $line -Encoding UTF8
+        Add-RunLogLine $line
     }
     if ($LASTEXITCODE -ne 0) {
         throw "Command failed with exit code ${LASTEXITCODE}: $($Arguments -join ' ')"
@@ -87,7 +90,11 @@ function Invoke-ConfirmedBatches {
 }
 
 Write-RunLog "Full detection started. Log: $LogPath"
-Write-RunLog "KeepRoot=$KeepRoot Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
+if ([string]::IsNullOrWhiteSpace($KeepRoot)) {
+    Write-RunLog "KeepRoot=.env Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
+} else {
+    Write-RunLog "KeepRoot=$KeepRoot Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
+}
 
 $round = 0
 while ($true) {
@@ -102,14 +109,17 @@ while ($true) {
         Invoke-Pims @("backup-db", "--label", "full-detection-round-$round-$RunStamp")
     }
 
-    Invoke-Pims @(
+    $workflowArgs = @(
         "run-safe-workflow",
-        "--keep-root", $KeepRoot,
         "--md5-limit", "$Md5Limit",
         "--phash-limit", "$PhashLimit",
         "--thumbnail-limit", "$ThumbnailLimit",
         "--min-series-assets", "2"
     )
+    if (-not [string]::IsNullOrWhiteSpace($KeepRoot)) {
+        $workflowArgs = @("run-safe-workflow", "--keep-root", $KeepRoot) + $workflowArgs[1..($workflowArgs.Count - 1)]
+    }
+    Invoke-Pims $workflowArgs
 
     $progress = Get-ProgressSummary
     $assets = $progress.assets

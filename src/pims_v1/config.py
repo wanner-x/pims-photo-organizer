@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     cache_root: str = "./data/.cache"
     quarantine_root: str = "./data/.quarantine"
     logs_root: str = "./data/logs"
+    keep_root: str | None = None
     api_token: str | None = None
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
