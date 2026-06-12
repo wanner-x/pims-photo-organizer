@@ -24,6 +24,7 @@ PIMS_CACHE_ROOT=./data/.cache
 PIMS_QUARANTINE_ROOT=./data/.quarantine
 PIMS_API_TOKEN=<long-random-token>
 PIMS_DEEPSEEK_API_KEY=<optional>
+PIMS_WECHAT_WEBHOOK_URL=<optional enterprise wechat bot webhook>
 ```
 
 Run the API bound to localhost unless you have a reverse proxy with authentication:
@@ -74,6 +75,8 @@ uvicorn pims_v1.main:app --host 127.0.0.1 --port 8000
 Then browse to `http://127.0.0.1:8000/review-ui`.
 
 The review page can list duplicate quarantine batches, show overall indexing/hash progress, display the duplicate path alongside the existing keep-copy path, preview cached image thumbnails or video files, exclude planned operations, and confirm a batch. It intentionally does not execute quarantine moves; run `pims execute-batch <batch_id>` separately only after reviewing and confirming.
+
+When `PIMS_WECHAT_WEBHOOK_URL` is set, `run-safe-workflow` sends an Enterprise WeChat text notification whenever it creates a new duplicate quarantine batch with operations requiring approval.
 
 Exclude a planned operation when needed through the API:
 
