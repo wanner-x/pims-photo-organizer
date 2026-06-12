@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
+from pims_v1.models.library import Library
 from pims_v1.models.operation import Operation, OperationBatch
 from pims_v1.services.delete_service import move_to_quarantine
 
@@ -137,6 +138,14 @@ def list_operation_batches(session: Session) -> list[dict[str, int | str | None]
     ]
 
 
+def _media_url(asset: Asset) -> str:
+    return f"/media/assets/{asset.id}"
+
+
+def _thumbnail_url(asset: Asset) -> str:
+    return f"/thumbnails/{asset.id}.jpg"
+
+
 def _operation_asset_payload(asset: Asset | None) -> dict[str, int | str | None] | None:
     if asset is None:
         return None
@@ -144,11 +153,79 @@ def _operation_asset_payload(asset: Asset | None) -> dict[str, int | str | None]
         "id": asset.id,
         "file_name": asset.file_name,
         "current_path": asset.current_path or asset.original_path,
+        "file_ext": asset.file_ext,
         "file_size": asset.file_size,
         "hash_md5": asset.hash_md5,
         "hash_phash": asset.hash_phash,
-        "thumbnail_url": f"/thumbnails/{asset.id}.jpg",
+        "media_url": _media_url(asset),
+        "thumbnail_url": _thumbnail_url(asset),
     }
+
+
+def _keep_root_from_description(description: str | None) -> str | None:
+    if not description or not description.startswith("Keep copies under "):
+        return None
+    keep_root, _, _ = description[len("Keep copies under ") :].partition(";")
+    return keep_root or None
+
+
+def _duplicate_role(asset: Asset, operation: Operation, keep_root: str | None) -> tuple[str, str]:
+    if asset.id == operation.asset_id:
+        return "duplicate_target", "重复位置，将隔离"
+    if keep_root and _is_under_root(_asset_path(asset), keep_root):
+        return "keep_copy", "已存在位置，建议保留"
+    return "related_copy", "同内容副本"
+
+
+def _duplicate_asset_payload(
+    *,
+    asset: Asset,
+    library_kind: str | None,
+    operation: Operation,
+    keep_root: str | None,
+) -> dict[str, int | str | None]:
+    role, role_label = _duplicate_role(asset, operation, keep_root)
+    return {
+        "id": asset.id,
+        "file_name": asset.file_name,
+        "current_path": asset.current_path or asset.original_path,
+        "file_ext": asset.file_ext,
+        "file_size": asset.file_size,
+        "hash_md5": asset.hash_md5,
+        "hash_phash": asset.hash_phash,
+        "library_kind": library_kind,
+        "media_url": _media_url(asset),
+        "role": role,
+        "role_label": role_label,
+        "thumbnail_url": _thumbnail_url(asset),
+    }
+
+
+def _operation_duplicate_assets(
+    session: Session,
+    operation: Operation,
+    asset: Asset | None,
+    keep_root: str | None,
+) -> list[dict[str, int | str | None]]:
+    if asset is None or not asset.hash_md5:
+        return []
+
+    rows = (
+        session.query(Asset, Library.kind)
+        .join(Library, Library.id == Asset.library_id)
+        .filter(Asset.hash_md5 == asset.hash_md5)
+        .order_by(Asset.id)
+        .all()
+    )
+    return [
+        _duplicate_asset_payload(
+            asset=row_asset,
+            library_kind=library_kind,
+            operation=operation,
+            keep_root=keep_root,
+        )
+        for row_asset, library_kind in rows
+    ]
 
 
 def list_batch_operations(
@@ -169,6 +246,8 @@ def list_batch_operations(
 
     operations = query.offset(offset).limit(limit).all()
     result = []
+    batch = session.get(OperationBatch, batch_id)
+    keep_root = _keep_root_from_description(batch.description if batch else None)
     for operation in operations:
         asset = session.get(Asset, operation.asset_id) if operation.asset_id is not None else None
         result.append(
@@ -180,6 +259,12 @@ def list_batch_operations(
                 "from_path": operation.from_path,
                 "to_path": operation.to_path,
                 "asset": _operation_asset_payload(asset),
+                "duplicate_assets": _operation_duplicate_assets(
+                    session=session,
+                    operation=operation,
+                    asset=asset,
+                    keep_root=keep_root,
+                ),
             }
         )
     return result

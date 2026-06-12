@@ -4,8 +4,10 @@ from sqlalchemy.orm import sessionmaker
 
 from pims_v1.api.operations import get_session
 from pims_v1.api.review import get_session as get_review_session
+from pims_v1.api.progress import get_session as get_progress_session
 from pims_v1.db import Base
 from pims_v1.main import app
+from pims_v1.main import get_session as get_media_session
 from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
@@ -202,6 +204,9 @@ def test_review_ui_page_exists():
     assert response.status_code == 200
     assert "PIMS Review" in response.text
     assert "待确认隔离批次" in response.text
+    assert "整理进度" in response.text
+    assert "已存在位置" in response.text
+    assert "重复位置" in response.text
 
 
 def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
@@ -209,11 +214,12 @@ def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
     Base.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     session = session_factory()
-    library_row = Library(name="Library", kind="local", root_path="/library")
-    session.add(library_row)
+    local_library = Library(name="Local", kind="local", root_path="/library")
+    nas_library = Library(name="NAS", kind="nas", root_path="/nas")
+    session.add_all([local_library, nas_library])
     session.flush()
     asset_row = Asset(
-        library_id=library_row.id,
+        library_id=local_library.id,
         original_path="/library/a.jpg",
         current_path="/library/a.jpg",
         file_name="a.jpg",
@@ -222,9 +228,23 @@ def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
         mtime=1.0,
         hash_md5="same",
     )
-    session.add(asset_row)
+    keep_asset = Asset(
+        library_id=nas_library.id,
+        original_path="/nas/a.jpg",
+        current_path="/nas/a.jpg",
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=123,
+        mtime=1.0,
+        hash_md5="same",
+    )
+    session.add_all([asset_row, keep_asset])
     session.flush()
-    batch = OperationBatch(batch_type="duplicate_quarantine", status="planned")
+    batch = OperationBatch(
+        batch_type="duplicate_quarantine",
+        status="planned",
+        description="Keep copies under /nas; quarantine duplicate copies elsewhere.",
+    )
     session.add(batch)
     session.flush()
     operation = Operation(
@@ -239,6 +259,7 @@ def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
     batch_id = batch.id
     operation_id = operation.id
     asset_id = asset_row.id
+    keep_asset_id = keep_asset.id
     session.close()
 
     def override_get_session():
@@ -272,11 +293,43 @@ def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
                 "id": asset_id,
                 "file_name": "a.jpg",
                 "current_path": "/library/a.jpg",
+                "file_ext": ".jpg",
                 "file_size": 123,
                 "hash_md5": "same",
                 "hash_phash": None,
+                "media_url": f"/media/assets/{asset_id}",
                 "thumbnail_url": f"/thumbnails/{asset_id}.jpg",
             },
+            "duplicate_assets": [
+                {
+                    "id": asset_id,
+                    "file_name": "a.jpg",
+                    "current_path": "/library/a.jpg",
+                    "file_ext": ".jpg",
+                    "file_size": 123,
+                    "hash_md5": "same",
+                    "hash_phash": None,
+                    "library_kind": "local",
+                    "media_url": f"/media/assets/{asset_id}",
+                    "role": "duplicate_target",
+                    "role_label": "重复位置，将隔离",
+                    "thumbnail_url": f"/thumbnails/{asset_id}.jpg",
+                },
+                {
+                    "id": keep_asset_id,
+                    "file_name": "a.jpg",
+                    "current_path": "/nas/a.jpg",
+                    "file_ext": ".jpg",
+                    "file_size": 123,
+                    "hash_md5": "same",
+                    "hash_phash": None,
+                    "library_kind": "nas",
+                    "media_url": f"/media/assets/{keep_asset_id}",
+                    "role": "keep_copy",
+                    "role_label": "已存在位置，建议保留",
+                    "thumbnail_url": f"/thumbnails/{keep_asset_id}.jpg",
+                },
+            ],
         }
     ]
 
@@ -298,6 +351,107 @@ def test_thumbnail_route_serves_cached_thumbnail(tmp_path):
 
     assert response.status_code == 200
     assert response.content == b"jpeg"
+
+
+def test_media_route_serves_video_asset(tmp_path):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"video")
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Videos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(video),
+        current_path=str(video),
+        file_name="clip.mp4",
+        file_ext=".mp4",
+        file_size=5,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.commit()
+    asset_id = asset_row.id
+    session.close()
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_media_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.get(f"/media/assets/{asset_id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.content == b"video"
+
+
+def test_progress_summary_api_reports_overall_progress(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    session.add_all(
+        [
+            Asset(
+                library_id=library_row.id,
+                original_path="/library/a.jpg",
+                current_path="/library/a.jpg",
+                file_name="a.jpg",
+                file_ext=".jpg",
+                file_size=1,
+                mtime=1.0,
+                hash_md5="a",
+                hash_phash="ff",
+            ),
+            Asset(
+                library_id=library_row.id,
+                original_path="/library/b.jpg",
+                current_path="/library/b.jpg",
+                file_name="b.jpg",
+                file_ext=".jpg",
+                file_size=1,
+                mtime=1.0,
+            ),
+        ]
+    )
+    session.commit()
+    session.close()
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_progress_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.get("/progress/summary")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["assets"] == {
+        "total": 2,
+        "md5_done": 1,
+        "md5_percent": 50.0,
+        "phash_done": 1,
+        "phash_percent": 50.0,
+    }
 
 
 def test_review_api_lists_exact_duplicate_groups(tmp_path):
