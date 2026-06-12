@@ -74,9 +74,11 @@ uvicorn pims_v1.main:app --host 127.0.0.1 --port 8000
 
 Then browse to `http://127.0.0.1:8000/review-ui`.
 
-The review page can list duplicate quarantine batches, show overall indexing/hash progress, display the duplicate path alongside the existing keep-copy path, preview cached image thumbnails or video files, exclude planned operations, and confirm a batch. It intentionally does not execute quarantine moves; run `pims execute-batch <batch_id>` separately only after reviewing and confirming.
+The review page can list duplicate quarantine batches, show overall indexing/hash progress, display background task status and the latest full-detection log tail, display the duplicate path alongside the existing keep-copy path, preview cached image thumbnails or video files, exclude planned operations, and confirm a batch. It intentionally does not execute quarantine moves; run `pims execute-batch <batch_id>` separately only after reviewing and confirming.
 
 When `PIMS_WECHAT_WEBHOOK_URL` is set, `run-safe-workflow` sends an Enterprise WeChat text notification whenever it creates a new duplicate quarantine batch with operations requiring approval.
+
+`run-safe-workflow` prints periodic hash progress lines while it is processing large batches, so long-running PowerShell logs show movement before a full round finishes.
 
 Exclude a planned operation when needed through the API:
 

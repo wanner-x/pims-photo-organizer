@@ -104,6 +104,33 @@ REVIEW_UI_HTML = r"""<!doctype html>
       grid-template-columns: repeat(4, minmax(150px, 1fr));
       gap: 12px;
     }
+    .runtime-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 15px;
+      box-shadow: var(--shadow);
+      display: grid;
+      gap: 10px;
+    }
+    .runtime-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+    pre.log-tail {
+      margin: 0;
+      max-height: 180px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      border-radius: 16px;
+      padding: 12px;
+      color: #dff9ee;
+      background: #15312d;
+      font: 12px/1.55 Consolas, "Cascadia Mono", monospace;
+    }
     .metric {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -281,6 +308,16 @@ REVIEW_UI_HTML = r"""<!doctype html>
         <div class="meta" id="operation-summary">操作计划加载中</div>
       </div>
     </div>
+    <div class="runtime-panel">
+      <div class="runtime-head">
+        <div>
+          <strong>后台任务状态</strong>
+          <div class="meta" id="task-summary">任务队列加载中</div>
+        </div>
+        <button id="refresh-log">刷新日志</button>
+      </div>
+      <pre id="log-tail" class="log-tail">日志加载中...</pre>
+    </div>
   </header>
   <main>
     <section>
@@ -345,6 +382,18 @@ REVIEW_UI_HTML = r"""<!doctype html>
       const confirmed = progress.operations?.confirmed ?? 0;
       const excluded = progress.operations?.excluded ?? 0;
       el("operation-summary").textContent = `待确认操作 ${fmt(planned)}，已确认 ${fmt(confirmed)}，已排除 ${fmt(excluded)}`;
+      const tasks = progress.tasks || [];
+      const taskText = tasks.length
+        ? tasks.map((task) => `${task.task_type}/${task.status}: ${fmt(task.count)}`).join("；")
+        : "暂无任务";
+      el("task-summary").textContent = taskText;
+    };
+    const renderLog = (payload) => {
+      if (!payload.found) {
+        el("log-tail").textContent = "还没有检测日志。";
+        return;
+      }
+      el("log-tail").textContent = [`日志：${payload.name}`, ...(payload.lines || [])].join("\n");
     };
     const renderBatches = () => {
       el("batch-count").textContent = `${fmt(state.batches.length)} 个批次`;
@@ -442,6 +491,10 @@ REVIEW_UI_HTML = r"""<!doctype html>
       const data = await jsonFetch("/progress/summary");
       renderProgress(data);
     };
+    const loadLog = async () => {
+      const data = await jsonFetch("/progress/logs/latest?lines=80");
+      renderLog(data);
+    };
     const loadBatches = async () => {
       setStatus("正在加载批次...");
       const data = await jsonFetch("/operations/batches");
@@ -496,10 +549,11 @@ REVIEW_UI_HTML = r"""<!doctype html>
       setStatus(`批次 #${result.batch_id} 已确认 ${fmt(result.operations)} 项。执行隔离仍需命令行单独执行。`);
     };
     const refreshAll = async () => {
-      await Promise.all([loadProgress(), loadBatches()]);
+      await Promise.all([loadProgress(), loadBatches(), loadLog()]);
       if (state.batchId) await loadOperations();
     };
     el("refresh").addEventListener("click", () => refreshAll().catch((error) => setStatus(`刷新失败：${error.message}`)));
+    el("refresh-log").addEventListener("click", () => loadLog().catch((error) => setStatus(`日志加载失败：${error.message}`)));
     el("status-filter").addEventListener("change", () => {
       state.offset = 0;
       loadOperations().catch((error) => setStatus(`加载失败：${error.message}`));

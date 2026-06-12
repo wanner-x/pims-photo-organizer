@@ -111,6 +111,7 @@ def test_create_duplicate_quarantine_plan_does_not_duplicate_active_operations(t
     assert first["operations"] == 1
     assert second["operations"] == 0
     assert session.query(Operation).count() == 1
+    assert session.query(OperationBatch).count() == 1
 
 
 def test_confirm_operation_batch_marks_planned_operations_confirmed(tmp_path):

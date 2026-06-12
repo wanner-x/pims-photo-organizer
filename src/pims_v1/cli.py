@@ -614,6 +614,17 @@ def run_safe_workflow_command(
     similar_threshold: int,
     database_url: str,
 ) -> int:
+    def print_progress(event: dict[str, int | str]) -> None:
+        task_type = event["task_type"]
+        seen = event["seen"]
+        processed = event.get("processed", 0)
+        failed = event.get("failed", 0)
+        print(
+            f"progress.{task_type}.seen={seen} "
+            f"processed={processed} failed={failed}",
+            flush=True,
+        )
+
     session = make_session(database_url)
     try:
         summary = run_safe_workflow(
@@ -625,6 +636,7 @@ def run_safe_workflow_command(
             thumbnail_limit=thumbnail_limit,
             min_series_assets=min_series_assets,
             similar_threshold=similar_threshold,
+            progress_callback=print_progress,
         )
     finally:
         session.close()

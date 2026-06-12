@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -11,29 +12,46 @@ from pims_v1.services.operation_plan_service import create_duplicate_quarantine_
 from pims_v1.services.phash_index_service import IMAGE_SUFFIXES
 from pims_v1.services.series_index_service import build_series_candidates
 from pims_v1.services.similar_index_service import build_similar_image_reviews
-from pims_v1.services.task_service import enqueue_task, recover_stale_tasks
+from pims_v1.services.task_service import recover_stale_tasks
 from pims_v1.services.task_worker_service import process_md5_tasks, process_phash_tasks
 from pims_v1.services.thumbnail_service import ensure_thumbnail
 
 
+ProgressCallback = Callable[[dict[str, int | str]], None]
+
+
+def _active_task_subject_ids(session: Session, task_type: str, asset_ids: list[int]) -> set[int]:
+    if not asset_ids:
+        return set()
+    rows = (
+        session.query(ProcessingTask.subject_id)
+        .filter(
+            ProcessingTask.task_type == task_type,
+            ProcessingTask.subject_type == "asset",
+            ProcessingTask.subject_id.in_(asset_ids),
+            ProcessingTask.status.in_(("pending", "running")),
+        )
+        .all()
+    )
+    return {row.subject_id for row in rows}
+
+
 def _enqueue_hash_tasks(session: Session, task_type: str, hash_column, limit: int) -> int:
     query = session.query(Asset).filter(hash_column.is_(None)).order_by(Asset.id).limit(limit)
-    queued = 0
-    for asset in query.all():
-        existing = (
-            session.query(ProcessingTask.id)
-            .filter(
-                ProcessingTask.task_type == task_type,
-                ProcessingTask.subject_type == "asset",
-                ProcessingTask.subject_id == asset.id,
-                ProcessingTask.status.in_(("pending", "running")),
-            )
-            .first()
+    assets = query.all()
+    existing_subject_ids = _active_task_subject_ids(session, task_type, [asset.id for asset in assets])
+    tasks = [
+        ProcessingTask(
+            task_type=task_type,
+            subject_type="asset",
+            subject_id=asset.id,
         )
-        enqueue_task(session, task_type, "asset", asset.id)
-        if existing is None:
-            queued += 1
-    return queued
+        for asset in assets
+        if asset.id not in existing_subject_ids
+    ]
+    session.add_all(tasks)
+    session.commit()
+    return len(tasks)
 
 
 def _enqueue_phash_tasks(session: Session, limit: int) -> int:
@@ -44,22 +62,20 @@ def _enqueue_phash_tasks(session: Session, limit: int) -> int:
         .order_by(Asset.id)
         .limit(limit)
     )
-    queued = 0
-    for asset in query.all():
-        existing = (
-            session.query(ProcessingTask.id)
-            .filter(
-                ProcessingTask.task_type == "hash_phash",
-                ProcessingTask.subject_type == "asset",
-                ProcessingTask.subject_id == asset.id,
-                ProcessingTask.status.in_(("pending", "running")),
-            )
-            .first()
+    assets = query.all()
+    existing_subject_ids = _active_task_subject_ids(session, "hash_phash", [asset.id for asset in assets])
+    tasks = [
+        ProcessingTask(
+            task_type="hash_phash",
+            subject_type="asset",
+            subject_id=asset.id,
         )
-        enqueue_task(session, "hash_phash", "asset", asset.id)
-        if existing is None:
-            queued += 1
-    return queued
+        for asset in assets
+        if asset.id not in existing_subject_ids
+    ]
+    session.add_all(tasks)
+    session.commit()
+    return len(tasks)
 
 
 def _build_thumbnails(session: Session, cache_root: str | Path, limit: int) -> dict[str, int]:
@@ -109,13 +125,22 @@ def run_safe_workflow(
     min_series_assets: int = 2,
     similar_threshold: int = 6,
     stale_after_seconds: int = 300,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, dict[str, int]]:
     recovered = recover_stale_tasks(session, stale_after_seconds=stale_after_seconds)
     md5_queued = _enqueue_hash_tasks(session, "hash_md5", Asset.hash_md5, md5_limit)
-    md5 = process_md5_tasks(session=session, limit=md5_limit)
+    md5 = process_md5_tasks(
+        session=session,
+        limit=md5_limit,
+        progress_callback=progress_callback,
+    )
     duplicates = build_exact_duplicate_reviews(session=session)
     phash_queued = _enqueue_phash_tasks(session, phash_limit)
-    phash = process_phash_tasks(session=session, limit=phash_limit)
+    phash = process_phash_tasks(
+        session=session,
+        limit=phash_limit,
+        progress_callback=progress_callback,
+    )
     similar = build_similar_image_reviews(session=session, threshold=similar_threshold)
     series = build_series_candidates(session=session, min_assets=min_series_assets)
     thumbnails = _build_thumbnails(session=session, cache_root=cache_root, limit=thumbnail_limit)

@@ -104,6 +104,27 @@ def test_process_md5_tasks_respects_limit(tmp_path):
     assert pending == 1
 
 
+def test_process_md5_tasks_reports_progress(tmp_path):
+    session = make_session(tmp_path)
+    for index in range(3):
+        source = tmp_path / f"{index}.jpg"
+        source.write_bytes(f"asset-{index}".encode("ascii"))
+        asset_row = add_asset(session, source)
+        enqueue_task(session, "hash_md5", "asset", asset_row.id)
+    events = []
+
+    summary = process_md5_tasks(
+        session=session,
+        limit=3,
+        progress_interval=2,
+        progress_callback=lambda event: events.append(event.copy()),
+    )
+
+    assert summary == {"processed": 3, "failed": 0, "skipped_oversize": 0}
+    assert [event["processed"] for event in events] == [2, 3]
+    assert all(event["task_type"] == "hash_md5" for event in events)
+
+
 def test_process_phash_tasks_hashes_image_and_completes_task(tmp_path):
     from PIL import Image
 

@@ -3,6 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from pims_v1.api.operations import get_session
+import pims_v1.api.progress as progress_api
 from pims_v1.api.review import get_session as get_review_session
 from pims_v1.api.progress import get_session as get_progress_session
 from pims_v1.db import Base
@@ -452,6 +453,30 @@ def test_progress_summary_api_reports_overall_progress(tmp_path):
         "phash_done": 1,
         "phash_total": 1,
         "phash_percent": 100.0,
+    }
+
+
+def test_progress_latest_log_api_returns_tail_lines(tmp_path):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    old_log = log_dir / "full-detection-20260612-010000.log"
+    new_log = log_dir / "full-detection-20260612-020000.log"
+    old_log.write_text("old\n", encoding="utf-8")
+    new_log.write_text("one\ntwo\nthree\n", encoding="utf-8")
+
+    old_logs_root = progress_api.settings.logs_root
+    progress_api.settings.logs_root = str(log_dir)
+    try:
+        client = TestClient(app)
+        response = client.get("/progress/logs/latest", params={"lines": 2})
+    finally:
+        progress_api.settings.logs_root = old_logs_root
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "found": True,
+        "name": "full-detection-20260612-020000.log",
+        "lines": ["two", "three"],
     }
 
 

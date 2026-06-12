@@ -34,15 +34,7 @@ def _choose_keep_asset(assets: list[Asset], keep_root: str) -> Asset:
 
 
 def create_duplicate_quarantine_plan(session: Session, keep_root: str) -> dict[str, int]:
-    batch = OperationBatch(
-        batch_type="duplicate_quarantine",
-        status="planned",
-        description=f"Keep copies under {keep_root}; quarantine duplicate copies elsewhere.",
-    )
-    session.add(batch)
-    session.flush()
-
-    operation_count = 0
+    planned_operations = []
     groups = session.query(DuplicateGroup).order_by(DuplicateGroup.id).all()
     for group in groups:
         assets = (
@@ -70,19 +62,37 @@ def create_duplicate_quarantine_plan(session: Session, keep_root: str) -> dict[s
             )
             if existing is not None:
                 continue
-            session.add(
-                Operation(
-                    batch_id=batch.id,
-                    operation_type="quarantine_duplicate",
-                    asset_id=asset.id,
-                    from_path=_asset_path(asset),
-                    status="planned",
-                )
+            planned_operations.append(
+                {
+                    "asset_id": asset.id,
+                    "from_path": _asset_path(asset),
+                }
             )
-            operation_count += 1
+
+    if not planned_operations:
+        return {"batch_id": 0, "operations": 0}
+
+    batch = OperationBatch(
+        batch_type="duplicate_quarantine",
+        status="planned",
+        description=f"Keep copies under {keep_root}; quarantine duplicate copies elsewhere.",
+    )
+    session.add(batch)
+    session.flush()
+
+    for operation in planned_operations:
+        session.add(
+            Operation(
+                batch_id=batch.id,
+                operation_type="quarantine_duplicate",
+                asset_id=operation["asset_id"],
+                from_path=operation["from_path"],
+                status="planned",
+            )
+        )
 
     session.commit()
-    return {"batch_id": batch.id, "operations": operation_count}
+    return {"batch_id": batch.id, "operations": len(planned_operations)}
 
 
 def exclude_operation(session: Session, operation_id: int) -> dict[str, int | str]:
