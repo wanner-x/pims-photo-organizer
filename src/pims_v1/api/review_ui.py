@@ -517,6 +517,10 @@ REVIEW_UI_HTML = r"""<!doctype html>
     <nav class="view-nav" aria-label="审核功能导航">
       <button class="view-tab active" data-view-target="overview" type="button">总览进度<span>看全量检测、后台任务和日志</span></button>
       <button class="view-tab" data-view-target="series" type="button">AI 系列整理<span>审核 AI 命名、分类和 NAS 移动目标</span></button>
+      <button class="view-tab" data-view-target="archive" type="button">自动归档概览<span>看自动执行、抽检和失败统计</span></button>
+      <button class="view-tab" data-view-target="sampling" type="button">抽检队列<span>查看自动通过但需要抽样复核的项目</span></button>
+      <button class="view-tab" data-view-target="anomalies" type="button">异常队列<span>只看需要人工介入的高风险项目</span></button>
+      <button class="view-tab" data-view-target="ledger" type="button">执行账本<span>查看自动移动记录并支持回滚</span></button>
       <button class="view-tab" data-view-target="duplicates" type="button">重复隔离审核<span>对比已存在位置和重复位置，再确认隔离</span></button>
     </nav>
     <div id="view-overview" class="view-panel" data-view-panel="overview">
@@ -574,6 +578,65 @@ REVIEW_UI_HTML = r"""<!doctype html>
       <div class="empty">系列候选加载中...</div>
     </div>
   </section>
+  <section id="view-archive" class="series-review-panel view-panel" data-view-panel="archive" hidden>
+    <div class="section-head">
+      <div>
+        <h2>自动归档概览</h2>
+        <div class="meta">自动归档、抽检和失败统计。这里看系统最近自动做了什么。</div>
+      </div>
+      <button id="refresh-archive-overview">刷新概览</button>
+    </div>
+    <div class="series-list">
+      <div class="series-card">
+        <strong>规划状态</strong>
+        <div class="series-plan" id="archive-planning-summary">加载中...</div>
+      </div>
+      <div class="series-card">
+        <strong>执行状态</strong>
+        <div class="series-plan" id="archive-execution-summary">加载中...</div>
+      </div>
+      <div class="series-card">
+        <strong>风险事件</strong>
+        <div class="series-plan" id="archive-risk-summary">加载中...</div>
+      </div>
+    </div>
+  </section>
+  <section id="view-sampling" class="series-review-panel view-panel" data-view-panel="sampling" hidden>
+    <div class="section-head">
+      <div>
+        <h2>抽检队列</h2>
+        <div class="meta">自动通过但需要抽检的项目，主要用于质量控制和漂移监控。</div>
+      </div>
+      <button id="refresh-sampling">刷新抽检</button>
+    </div>
+    <div id="sampling-list" class="series-list">
+      <div class="empty">抽检队列加载中...</div>
+    </div>
+  </section>
+  <section id="view-anomalies" class="series-review-panel view-panel" data-view-panel="anomalies" hidden>
+    <div class="section-head">
+      <div>
+        <h2>异常队列</h2>
+        <div class="meta">只显示需要人工处理的高风险项目，例如 R18、冲突或规则与 AI 分歧。</div>
+      </div>
+      <button id="refresh-anomalies">刷新异常</button>
+    </div>
+    <div id="anomaly-list" class="series-list">
+      <div class="empty">异常队列加载中...</div>
+    </div>
+  </section>
+  <section id="view-ledger" class="series-review-panel view-panel" data-view-panel="ledger" hidden>
+    <div class="section-head">
+      <div>
+        <h2>执行账本</h2>
+        <div class="meta">查看自动移动记录、决策依据和回滚入口。</div>
+      </div>
+      <button id="refresh-ledger">刷新账本</button>
+    </div>
+    <div id="ledger-list" class="series-list">
+      <div class="empty">执行账本加载中...</div>
+    </div>
+  </section>
   <main id="view-duplicates" class="view-panel" data-view-panel="duplicates" hidden>
     <section>
       <div class="section-head">
@@ -611,7 +674,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
     <div id="preview-modal-content"></div>
   </div>
   <script>
-    const viewNames = new Set(["overview", "series", "duplicates"]);
+    const viewNames = new Set(["overview", "series", "archive", "sampling", "anomalies", "ledger", "duplicates"]);
     const state = {
       activeView: "overview",
       batches: [],
@@ -620,6 +683,10 @@ REVIEW_UI_HTML = r"""<!doctype html>
       limit: 100,
       total: 0,
       series: [],
+      archiveOverview: null,
+      archiveSampling: [],
+      archiveAnomalies: [],
+      archiveLedger: [],
       selectedSeriesIds: new Set(),
     };
     const videoExts = new Set([".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"]);
@@ -666,6 +733,22 @@ REVIEW_UI_HTML = r"""<!doctype html>
       }
       if (state.activeView === "series") {
         await Promise.all([loadProgress(), loadSeries()]);
+        return;
+      }
+      if (state.activeView === "archive") {
+        await Promise.all([loadProgress(), loadArchiveOverview()]);
+        return;
+      }
+      if (state.activeView === "sampling") {
+        await Promise.all([loadProgress(), loadArchiveSampling()]);
+        return;
+      }
+      if (state.activeView === "anomalies") {
+        await Promise.all([loadProgress(), loadArchiveAnomalies()]);
+        return;
+      }
+      if (state.activeView === "ledger") {
+        await Promise.all([loadProgress(), loadArchiveLedger()]);
         return;
       }
       await Promise.all([loadProgress(), loadBatches()]);
@@ -781,6 +864,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
           </div>
           <div class="actions">
             <button data-action="suggest">AI 生成分类/命名</button>
+            <button class="primary" data-action="auto-archive">双引擎自动归档</button>
             <button class="primary" data-action="confirm" ${suggestion.id ? "" : "disabled"}>确认并移动到 NAS</button>
           </div>
           <div class="series-busy" data-role="busy" aria-live="polite"></div>
@@ -818,6 +902,12 @@ REVIEW_UI_HTML = r"""<!doctype html>
             setStatus(`AI 建议失败：${error.message}`);
           });
         });
+        node.querySelector('[data-action="auto-archive"]').addEventListener("click", (event) => {
+          withButtonLoading(event.currentTarget, "自动归档中...", () => autoArchiveSeries(candidate.id)).catch((error) => {
+            setSeriesCardBusy(candidate.id, `自动归档失败：${error.message}`, true);
+            setStatus(`自动归档失败：${error.message}`);
+          });
+        });
         node.querySelector('[data-action="confirm"]').addEventListener("click", (event) => {
           withButtonLoading(event.currentTarget, "移动中...", () => confirmSeries(candidate, node)).catch((error) => {
             setSeriesCardBusy(candidate.id, `确认移动失败：${error.message}`, true);
@@ -827,6 +917,104 @@ REVIEW_UI_HTML = r"""<!doctype html>
         return node;
       }));
       updateSeriesSelectionCount();
+    };
+    const renderArchiveOverview = (overview) => {
+      state.archiveOverview = overview;
+      const planning = overview?.planning || {};
+      const executions = overview?.executions || {};
+      el("archive-planning-summary").innerHTML = `
+        <div><strong>自动通过：</strong>${fmt(planning.auto_apply || 0)}</div>
+        <div><strong>自动通过待抽检：</strong>${fmt(planning.auto_apply_sampled || 0)}</div>
+        <div><strong>人工审核：</strong>${fmt(planning.manual_review || 0)}</div>
+      `;
+      el("archive-execution-summary").innerHTML = `
+        <div><strong>执行成功：</strong>${fmt(executions.done || 0)}</div>
+        <div><strong>已回滚：</strong>${fmt(executions.rolled_back || 0)}</div>
+        <div><strong>执行失败：</strong>${fmt(executions.failed || 0)}</div>
+      `;
+      el("archive-risk-summary").innerHTML = `
+        <div><strong>风险事件总数：</strong>${fmt(overview?.risk_events || 0)}</div>
+      `;
+    };
+    const renderArchiveAnomalies = (items) => {
+      state.archiveAnomalies = items || [];
+      if (!state.archiveAnomalies.length) {
+        el("anomaly-list").innerHTML = `<div class="empty">当前没有异常项。</div>`;
+        return;
+      }
+      el("anomaly-list").replaceChildren(...state.archiveAnomalies.map((item) => {
+        const node = document.createElement("article");
+        node.className = "series-card";
+        node.innerHTML = `
+          <span class="pill">${item.event_type}</span>
+          <strong>${item.candidate?.title || "未命名候选"}</strong>
+          <div class="meta"></div>
+          <div class="series-plan">
+            <div><strong>决策：</strong>${item.decision_type || "-"}</div>
+            <div><strong>原因：</strong>${item.decision_reason || "-"}</div>
+            <div><strong>细节：</strong>${JSON.stringify(item.details || {}, null, 0)}</div>
+          </div>
+        `;
+        node.querySelector(".meta").textContent = item.candidate?.source_root || "";
+        return node;
+      }));
+    };
+    const renderArchiveSampling = (items) => {
+      state.archiveSampling = items || [];
+      if (!state.archiveSampling.length) {
+        el("sampling-list").innerHTML = `<div class="empty">当前没有待抽检项目。</div>`;
+        return;
+      }
+      el("sampling-list").replaceChildren(...state.archiveSampling.map((item) => {
+        const node = document.createElement("article");
+        node.className = "series-card";
+        node.innerHTML = `
+          <span class="pill">${item.decision_type}</span>
+          <strong>${item.candidate?.title || "未命名候选"}</strong>
+          <div class="meta"></div>
+          <div class="series-plan">
+            <div><strong>规则分：</strong>${item.rule_score ?? "-"}</div>
+            <div><strong>AI 分：</strong>${item.ai_score ?? "-"}</div>
+            <div><strong>风险分：</strong>${item.risk_score ?? "-"}</div>
+            <div><strong>原因：</strong>${item.decision_reason || "-"}</div>
+          </div>
+        `;
+        node.querySelector(".meta").textContent = item.candidate?.source_root || "";
+        return node;
+      }));
+    };
+    const renderArchiveLedger = (items) => {
+      state.archiveLedger = items || [];
+      if (!state.archiveLedger.length) {
+        el("ledger-list").innerHTML = `<div class="empty">当前没有执行记录。</div>`;
+        return;
+      }
+      el("ledger-list").replaceChildren(...state.archiveLedger.map((item) => {
+        const node = document.createElement("article");
+        node.className = "series-card";
+        node.innerHTML = `
+          <span class="pill">执行 #${item.id}</span>
+          <span class="pill">${item.status}</span>
+          <strong>${item.candidate_title || "未命名候选"}</strong>
+          <div class="meta"></div>
+          <div class="series-plan">
+            <div><strong>决策：</strong>${item.decision_type || "-"}</div>
+            <div><strong>来源：</strong>${item.source_path || "-"}</div>
+            <div><strong>目标：</strong>${item.target_path || "-"}</div>
+            <div><strong>原因：</strong>${item.decision_reason || "-"}</div>
+          </div>
+          <div class="actions">
+            <button class="warn" data-action="rollback" ${item.status === "done" ? "" : "disabled"}>回滚这次移动</button>
+          </div>
+        `;
+        node.querySelector(".meta").textContent = item.source_root || "";
+        node.querySelector('[data-action="rollback"]').addEventListener("click", (event) => {
+          withButtonLoading(event.currentTarget, "回滚中...", () => rollbackExecution(item.id)).catch((error) => {
+            setStatus(`回滚失败：${error.message}`);
+          });
+        });
+        return node;
+      }));
     };
     const updateSeriesSelectionCount = () => {
       const count = state.selectedSeriesIds.size;
@@ -970,6 +1158,22 @@ REVIEW_UI_HTML = r"""<!doctype html>
       state.series = data.items;
       renderSeries();
     };
+    const loadArchiveOverview = async () => {
+      const data = await jsonFetch("/review/archive/overview");
+      renderArchiveOverview(data);
+    };
+    const loadArchiveSampling = async () => {
+      const data = await jsonFetch("/review/archive/sampling?limit=30");
+      renderArchiveSampling(data.items);
+    };
+    const loadArchiveAnomalies = async () => {
+      const data = await jsonFetch("/review/archive/anomalies?limit=30");
+      renderArchiveAnomalies(data.items);
+    };
+    const loadArchiveLedger = async () => {
+      const data = await jsonFetch("/review/archive/executions?limit=30");
+      renderArchiveLedger(data.items);
+    };
     const suggestSeries = async (candidateId) => {
       setStatus(`正在为候选 #${candidateId} 生成 AI 分类/命名...`);
       setSeriesCardBusy(candidateId, "正在调用 AI 生成分类/命名，请稍候...");
@@ -977,6 +1181,19 @@ REVIEW_UI_HTML = r"""<!doctype html>
       await loadSeries();
       setStatus(`候选 #${candidateId} 的 AI 建议已生成，请审核后确认。`);
       setBulkStatus("");
+    };
+    const autoArchiveSeries = async (candidateId) => {
+      setStatus(`正在为候选 #${candidateId} 执行双引擎自动归档...`);
+      await jsonFetch(`/review/series/${candidateId}/auto-archive`, {method: "POST", auth: true});
+      await Promise.all([loadSeries(), loadProgress(), loadArchiveOverview(), loadArchiveAnomalies(), loadArchiveLedger()]);
+      setStatus(`候选 #${candidateId} 的双引擎自动归档已完成。`);
+      setBulkStatus("");
+    };
+    const rollbackExecution = async (executionId) => {
+      setStatus(`正在回滚执行记录 #${executionId}...`);
+      await jsonFetch(`/review/archive/executions/${executionId}/rollback`, {method: "POST", auth: true});
+      await Promise.all([loadSeries(), loadProgress(), loadArchiveOverview(), loadArchiveAnomalies(), loadArchiveLedger()]);
+      setStatus(`执行记录 #${executionId} 已回滚。`);
     };
     const selectedSeries = () => state.series.filter((candidate) => state.selectedSeriesIds.has(candidate.id));
     const selectVisibleSeries = () => {
@@ -1130,7 +1347,16 @@ REVIEW_UI_HTML = r"""<!doctype html>
       setStatus(`批次 #${result.batch_id} 已确认 ${fmt(result.operations)} 项。执行隔离仍需命令行单独执行。`);
     };
     const refreshAll = async () => {
-      await Promise.all([loadProgress(), loadBatches(), loadSeries(), loadLog()]);
+      await Promise.all([
+        loadProgress(),
+        loadBatches(),
+        loadSeries(),
+        loadLog(),
+        loadArchiveOverview(),
+        loadArchiveSampling(),
+        loadArchiveAnomalies(),
+        loadArchiveLedger(),
+      ]);
       if (state.batchId) await loadOperations();
     };
     document.querySelectorAll("[data-view-target]").forEach((tab) => {
@@ -1139,6 +1365,10 @@ REVIEW_UI_HTML = r"""<!doctype html>
     window.addEventListener("hashchange", () => switchView(window.location.hash.slice(1), false));
     el("refresh").addEventListener("click", () => refreshActiveView().catch((error) => setStatus(`刷新失败：${error.message}`)));
     el("refresh-series").addEventListener("click", () => loadSeries().catch((error) => setStatus(`系列加载失败：${error.message}`)));
+    el("refresh-archive-overview").addEventListener("click", () => loadArchiveOverview().catch((error) => setStatus(`自动归档概览加载失败：${error.message}`)));
+    el("refresh-sampling").addEventListener("click", () => loadArchiveSampling().catch((error) => setStatus(`抽检队列加载失败：${error.message}`)));
+    el("refresh-anomalies").addEventListener("click", () => loadArchiveAnomalies().catch((error) => setStatus(`异常队列加载失败：${error.message}`)));
+    el("refresh-ledger").addEventListener("click", () => loadArchiveLedger().catch((error) => setStatus(`执行账本加载失败：${error.message}`)));
     el("select-visible-series").addEventListener("click", selectVisibleSeries);
     el("clear-series-selection").addEventListener("click", clearSeriesSelection);
     el("batch-suggest-series").addEventListener("click", (event) => {

@@ -3,6 +3,7 @@ import json
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from pims_v1.models.archive_decision import ArchiveExecutionRecord, ArchivePlanningRecord, ArchiveRiskEvent
 from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.similar import SimilarGroup, SimilarGroupAsset
@@ -106,6 +107,121 @@ def list_series_review_candidates(
                     "status": suggestion.status,
                 },
                 "assets": [_series_asset_payload(asset) for asset in asset_rows[:asset_limit]],
+            }
+        )
+    return result
+
+
+def get_archive_review_overview(session: Session) -> dict[str, dict[str, int] | int]:
+    planning_rows = (
+        session.query(
+            ArchivePlanningRecord.decision_type,
+            func.count(ArchivePlanningRecord.id),
+        )
+        .group_by(ArchivePlanningRecord.decision_type)
+        .all()
+    )
+    execution_rows = (
+        session.query(
+            ArchiveExecutionRecord.status,
+            func.count(ArchiveExecutionRecord.id),
+        )
+        .group_by(ArchiveExecutionRecord.status)
+        .all()
+    )
+    return {
+        "planning": {str(decision_type): count for decision_type, count in planning_rows},
+        "executions": {str(status): count for status, count in execution_rows},
+        "risk_events": session.query(ArchiveRiskEvent).count(),
+    }
+
+
+def list_archive_anomalies(session: Session, limit: int = 20) -> list[dict]:
+    rows = (
+        session.query(ArchiveRiskEvent, ArchivePlanningRecord, SeriesCandidate)
+        .join(ArchivePlanningRecord, ArchivePlanningRecord.id == ArchiveRiskEvent.planning_record_id)
+        .join(SeriesCandidate, SeriesCandidate.id == ArchivePlanningRecord.candidate_id)
+        .order_by(ArchiveRiskEvent.id.desc())
+        .limit(limit)
+        .all()
+    )
+    result = []
+    for risk_event, planning_record, candidate in rows:
+        result.append(
+            {
+                "id": risk_event.id,
+                "event_type": risk_event.event_type,
+                "severity": risk_event.severity,
+                "details": json.loads(risk_event.details_json or "{}"),
+                "decision_type": planning_record.decision_type,
+                "decision_reason": planning_record.decision_reason,
+                "candidate": {
+                    "id": candidate.id,
+                    "title": candidate.title,
+                    "source_root": candidate.source_root,
+                    "status": candidate.status,
+                },
+            }
+        )
+    return result
+
+
+def list_archive_execution_ledger(session: Session, limit: int = 20) -> list[dict]:
+    rows = (
+        session.query(ArchiveExecutionRecord, ArchivePlanningRecord, SeriesCandidate)
+        .join(ArchivePlanningRecord, ArchivePlanningRecord.id == ArchiveExecutionRecord.planning_record_id)
+        .join(SeriesCandidate, SeriesCandidate.id == ArchivePlanningRecord.candidate_id)
+        .order_by(ArchiveExecutionRecord.id.desc())
+        .limit(limit)
+        .all()
+    )
+    result = []
+    for execution, planning_record, candidate in rows:
+        result.append(
+            {
+                "id": execution.id,
+                "candidate_id": candidate.id,
+                "candidate_title": candidate.title,
+                "source_root": candidate.source_root,
+                "decision_type": planning_record.decision_type,
+                "decision_reason": planning_record.decision_reason,
+                "operation_type": execution.operation_type,
+                "source_path": execution.source_path,
+                "target_path": execution.target_path,
+                "status": execution.status,
+                "started_at": execution.started_at.isoformat() if execution.started_at else None,
+                "finished_at": execution.finished_at.isoformat() if execution.finished_at else None,
+                "error_message": execution.error_message,
+            }
+        )
+    return result
+
+
+def list_archive_sampling_queue(session: Session, limit: int = 20) -> list[dict]:
+    rows = (
+        session.query(ArchivePlanningRecord, SeriesCandidate)
+        .join(SeriesCandidate, SeriesCandidate.id == ArchivePlanningRecord.candidate_id)
+        .filter(ArchivePlanningRecord.decision_type == "auto_apply_sampled")
+        .order_by(ArchivePlanningRecord.id.desc())
+        .limit(limit)
+        .all()
+    )
+    result = []
+    for planning_record, candidate in rows:
+        result.append(
+            {
+                "id": planning_record.id,
+                "decision_type": planning_record.decision_type,
+                "decision_reason": planning_record.decision_reason,
+                "rule_score": planning_record.rule_score,
+                "ai_score": planning_record.ai_score,
+                "risk_score": planning_record.risk_score,
+                "candidate": {
+                    "id": candidate.id,
+                    "title": candidate.title,
+                    "source_root": candidate.source_root,
+                    "status": candidate.status,
+                },
             }
         )
     return result

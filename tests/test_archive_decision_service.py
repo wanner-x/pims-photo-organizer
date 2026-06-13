@@ -5,11 +5,16 @@ from sqlalchemy.orm import sessionmaker
 
 from pims_v1.db import Base
 from pims_v1.models import archive_decision, asset, duplicate, library, operation, processing, review, series
-from pims_v1.models.archive_decision import ArchiveExecutionRecord, ArchivePlanningRecord, ArchiveRiskEvent
+from pims_v1.models.archive_decision import (
+    ArchiveExecutionRecord,
+    ArchivePlanningRecord,
+    ArchiveRiskEvent,
+    ArchiveRollbackRecord,
+)
 from pims_v1.models.asset import Asset
 from pims_v1.models.library import Library
 from pims_v1.models.series import Series, SeriesCandidate, SeriesCandidateAsset
-from pims_v1.services.archive_decision_service import auto_archive_candidate
+from pims_v1.services.archive_decision_service import auto_archive_candidate, rollback_archive_execution
 
 
 class StaticAIPlanClient:
@@ -137,3 +142,41 @@ def test_auto_archive_candidate_blocks_r18_suspicion(tmp_path):
     assert planning_row.decision_type == "manual_review"
     assert risk_row.event_type == "r18_suspected"
     assert session.query(ArchiveExecutionRecord).count() == 0
+
+
+def test_rollback_archive_execution_restores_original_asset_path(tmp_path):
+    session, candidate_id, archive_root = build_candidate_fixture(tmp_path)
+    client = StaticAIPlanClient(
+        {
+            "title": "闆惇SAMA 閫忔槑濂充粏 [43P4V234MB]",
+            "category": "闆惇SAMA",
+            "archive_path": "",
+            "plan_summary": "淇濇寔浜虹墿鐩綍缁撴瀯",
+            "risk_flags": [],
+            "tags": [],
+            "r18_label": False,
+            "r18_confidence": 0.0,
+            "r18_reason": "",
+            "confidence": 0.93,
+        }
+    )
+    result = auto_archive_candidate(
+        session=session,
+        candidate_id=candidate_id,
+        archive_root=str(archive_root),
+        client=client,
+    )
+
+    execution_id = session.query(ArchiveExecutionRecord.id).one()[0]
+    rollback = rollback_archive_execution(session=session, execution_id=execution_id, operator="tester")
+
+    asset_row = session.query(Asset).one()
+    execution_row = session.query(ArchiveExecutionRecord).one()
+    rollback_row = session.query(ArchiveRollbackRecord).one()
+
+    assert result["status"] == "confirmed"
+    assert rollback["status"] == "rolled_back"
+    assert asset_row.current_path.endswith("001.jpg")
+    assert "pc" in asset_row.current_path
+    assert execution_row.status == "rolled_back"
+    assert rollback_row.operator == "tester"

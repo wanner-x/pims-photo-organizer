@@ -6,9 +6,14 @@ from sqlalchemy.orm import Session
 
 from pims_v1.config import settings
 from pims_v1.db import SessionLocal, ensure_database_schema, engine
+from pims_v1.services.archive_decision_service import auto_archive_candidate, rollback_archive_execution
 from pims_v1.services.ai_naming_service import suggest_series_organization
 from pims_v1.services.deepseek_client import DeepSeekClient
 from pims_v1.services.review_service import (
+    get_archive_review_overview,
+    list_archive_anomalies,
+    list_archive_execution_ledger,
+    list_archive_sampling_queue,
     list_exact_duplicate_groups,
     list_series_review_candidates,
     list_similar_groups,
@@ -77,6 +82,26 @@ def list_series_for_review(
     return {"items": list_series_review_candidates(session=session, limit=limit, status=status)}
 
 
+@router.get("/archive/overview")
+def archive_review_overview(session: Session = Depends(get_session)) -> dict:
+    return get_archive_review_overview(session=session)
+
+
+@router.get("/archive/anomalies")
+def archive_anomalies(limit: int = 20, session: Session = Depends(get_session)) -> dict[str, list]:
+    return {"items": list_archive_anomalies(session=session, limit=limit)}
+
+
+@router.get("/archive/sampling")
+def archive_sampling(limit: int = 20, session: Session = Depends(get_session)) -> dict[str, list]:
+    return {"items": list_archive_sampling_queue(session=session, limit=limit)}
+
+
+@router.get("/archive/executions")
+def archive_execution_ledger(limit: int = 20, session: Session = Depends(get_session)) -> dict[str, list]:
+    return {"items": list_archive_execution_ledger(session=session, limit=limit)}
+
+
 @router.post("/series/{candidate_id}/suggest-ai")
 def suggest_series_ai(
     candidate_id: int,
@@ -101,6 +126,33 @@ def suggest_series_ai(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/series/{candidate_id}/auto-archive")
+def auto_archive_series(
+    candidate_id: int,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_api_token),
+) -> dict:
+    try:
+        client = DeepSeekClient(
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+            model=settings.deepseek_model,
+            reasoning_effort=settings.deepseek_reasoning_effort,
+            thinking_enabled=settings.deepseek_thinking_enabled,
+        )
+        archive_root = settings.keep_root
+        if not archive_root:
+            raise ValueError("PIMS_KEEP_ROOT is required")
+        return auto_archive_candidate(
+            session=session,
+            candidate_id=candidate_id,
+            archive_root=archive_root,
+            client=client,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/series-suggestions/{suggestion_id}/confirm")
 def confirm_series_ai_suggestion(
     suggestion_id: int,
@@ -119,6 +171,22 @@ def confirm_series_ai_suggestion(
             archive_root=archive_root,
             title=payload.title,
             category=payload.category,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/archive/executions/{execution_id}/rollback")
+def rollback_archive_execution_route(
+    execution_id: int,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_api_token),
+) -> dict:
+    try:
+        return rollback_archive_execution(
+            session=session,
+            execution_id=execution_id,
+            operator="review_api",
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

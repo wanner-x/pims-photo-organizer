@@ -2,13 +2,18 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from pims_v1.db import Base
-from pims_v1.models import asset, duplicate, library, operation, processing, review, series
+from pims_v1.models import archive_decision, asset, duplicate, library, operation, processing, review, series
+from pims_v1.models.archive_decision import ArchiveExecutionRecord, ArchivePlanningRecord, ArchiveRiskEvent
 from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
 from pims_v1.models.similar import SimilarGroup, SimilarGroupAsset
 from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset, SeriesSuggestion
 from pims_v1.services.review_service import (
+    get_archive_review_overview,
+    list_archive_anomalies,
+    list_archive_execution_ledger,
+    list_archive_sampling_queue,
     list_exact_duplicate_groups,
     list_series_review_candidates,
     list_series_candidates,
@@ -296,3 +301,165 @@ def test_list_similar_groups_returns_member_assets(tmp_path):
     assert groups[0]["id"] == group.id
     assert groups[0]["representative_phash"] == "ffff0000ffff0000"
     assert [row["id"] for row in groups[0]["assets"]] == [first.id, second.id]
+
+
+def test_list_archive_anomalies_returns_risk_events_and_candidate_context(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root="/library/紧急企划/紧急企划 - 见希-JK-R18 [85P1V1.32G]",
+        title="紧急企划 - 见希-JK-R18 [85P1V1.32G]",
+        status="pending_review",
+    )
+    session.add(candidate)
+    session.flush()
+    planning = ArchivePlanningRecord(
+        candidate_id=candidate.id,
+        source_root=candidate.source_root,
+        rule_plan_json="{}",
+        ai_plan_json="{}",
+        final_plan_json='{"title":"紧急企划 - 见希-JK-R18 [85P1V1.32G]"}',
+        decision_type="manual_review",
+        rule_score=0.9,
+        ai_score=0.9,
+        risk_score=1.0,
+        decision_reason="r18 suspected",
+    )
+    session.add(planning)
+    session.flush()
+    session.add(
+        ArchiveRiskEvent(
+            planning_record_id=planning.id,
+            event_type="r18_suspected",
+            severity="warning",
+            details_json='{"source":"ai"}',
+        )
+    )
+    session.commit()
+
+    items = list_archive_anomalies(session=session, limit=10)
+
+    assert items[0]["event_type"] == "r18_suspected"
+    assert items[0]["candidate"]["source_root"].endswith("R18 [85P1V1.32G]")
+    assert items[0]["decision_type"] == "manual_review"
+
+
+def test_list_archive_execution_ledger_returns_execution_and_rollback_state(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    candidate = SeriesCandidate(library_id=library_row.id, source_root="/library/set", title="set", status="confirmed")
+    session.add(candidate)
+    session.flush()
+    planning = ArchivePlanningRecord(
+        candidate_id=candidate.id,
+        source_root=candidate.source_root,
+        rule_plan_json="{}",
+        ai_plan_json="{}",
+        final_plan_json='{"title":"set"}',
+        decision_type="auto_apply",
+        rule_score=0.95,
+        ai_score=0.93,
+        risk_score=0.0,
+        decision_reason="agreed",
+    )
+    session.add(planning)
+    session.flush()
+    session.add(
+        ArchiveExecutionRecord(
+            planning_record_id=planning.id,
+            operation_type="archive_move",
+            source_path="/library/set/001.jpg",
+            target_path="/nas/set/001.jpg",
+            status="done",
+        )
+    )
+    session.commit()
+
+    items = list_archive_execution_ledger(session=session, limit=10)
+
+    assert items[0]["status"] == "done"
+    assert items[0]["decision_type"] == "auto_apply"
+    assert items[0]["source_path"] == "/library/set/001.jpg"
+
+
+def test_get_archive_review_overview_summarizes_auto_archive_state(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    candidate = SeriesCandidate(library_id=library_row.id, source_root="/library/set", title="set", status="confirmed")
+    session.add(candidate)
+    session.flush()
+    planning = ArchivePlanningRecord(
+        candidate_id=candidate.id,
+        source_root=candidate.source_root,
+        rule_plan_json="{}",
+        ai_plan_json="{}",
+        final_plan_json='{"title":"set"}',
+        decision_type="auto_apply",
+        rule_score=0.95,
+        ai_score=0.93,
+        risk_score=0.0,
+        decision_reason="agreed",
+    )
+    session.add(planning)
+    session.flush()
+    session.add(
+        ArchiveExecutionRecord(
+            planning_record_id=planning.id,
+            operation_type="archive_move",
+            source_path="/library/set/001.jpg",
+            target_path="/nas/set/001.jpg",
+            status="done",
+        )
+    )
+    session.commit()
+
+    summary = get_archive_review_overview(session=session)
+
+    assert summary["planning"]["auto_apply"] == 1
+    assert summary["executions"]["done"] == 1
+    assert summary["risk_events"] == 0
+
+
+def test_list_archive_sampling_queue_returns_auto_apply_sampled_items(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    candidate = SeriesCandidate(library_id=library_row.id, source_root="/library/set", title="set", status="confirmed")
+    session.add(candidate)
+    session.flush()
+    planning = ArchivePlanningRecord(
+        candidate_id=candidate.id,
+        source_root=candidate.source_root,
+        rule_plan_json="{}",
+        ai_plan_json="{}",
+        final_plan_json='{"title":"set"}',
+        decision_type="auto_apply_sampled",
+        rule_score=0.95,
+        ai_score=0.85,
+        risk_score=0.25,
+        decision_reason="sample review recommended",
+    )
+    session.add(planning)
+    session.flush()
+    session.add(
+        ArchiveRiskEvent(
+            planning_record_id=planning.id,
+            event_type="sample_review_recommended",
+            severity="warning",
+            details_json='{"reason":"title difference"}',
+        )
+    )
+    session.commit()
+
+    items = list_archive_sampling_queue(session=session, limit=10)
+
+    assert items[0]["decision_type"] == "auto_apply_sampled"
+    assert items[0]["candidate"]["id"] == candidate.id

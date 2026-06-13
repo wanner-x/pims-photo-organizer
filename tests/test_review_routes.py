@@ -10,6 +10,7 @@ from pims_v1.api.progress import get_session as get_progress_session
 from pims_v1.db import Base
 from pims_v1.main import app
 from pims_v1.main import get_session as get_media_session
+from pims_v1.models.archive_decision import ArchiveExecutionRecord, ArchivePlanningRecord, ArchiveRiskEvent
 from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
@@ -266,6 +267,23 @@ def test_review_ui_includes_mobile_adaptation_rules():
     assert "bottom: 12px" not in response.text
     assert "grid-template-columns: 1fr" in response.text
     assert "overflow-x: hidden" in response.text
+
+
+def test_review_ui_includes_archive_anomaly_and_ledger_views():
+    client = TestClient(app)
+
+    response = client.get("/review-ui")
+
+    assert response.status_code == 200
+    assert 'data-view-target="archive"' in response.text
+    assert 'data-view-target="sampling"' in response.text
+    assert 'data-view-target="anomalies"' in response.text
+    assert 'data-view-target="ledger"' in response.text
+    assert "loadArchiveOverview" in response.text
+    assert "loadArchiveSampling" in response.text
+    assert "loadArchiveAnomalies" in response.text
+    assert "loadArchiveLedger" in response.text
+    assert "rollbackExecution" in response.text
 
 
 def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
@@ -747,3 +765,308 @@ def test_review_series_confirm_suggestion_api_moves_assets_to_keep_root(tmp_path
     assert response.json()["moved"] == 1
     assert not source_file.exists()
     assert (archive_root / "写真合集" / "清晨写真" / "a.jpg").exists()
+
+
+def test_review_auto_archive_series_api_executes_dual_engine_archive(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    source_root = tmp_path / "pc" / "set"
+    source_root.mkdir(parents=True)
+    source_file = source_root / "a.jpg"
+    source_file.write_bytes(b"image")
+    archive_root = tmp_path / "nas"
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path=str(tmp_path / "pc"))
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(source_file),
+        current_path=str(source_file),
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=source_file.stat().st_size,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root="D:/图册/雪琪SAMA/雪琪SAMA 透明女仆 [43P4V234MB]",
+        title="雪琪SAMA 透明女仆 [43P4V234MB]",
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.commit()
+    candidate_id = candidate.id
+    session.close()
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def chat(self, messages):
+            return (
+                '{"title":"雪琪SAMA 透明女仆 [43P4V234MB]","category":"雪琪SAMA",'
+                '"archive_path":"","plan_summary":"保持人物目录结构","risk_flags":[],'
+                '"tags":[],"r18_label":false,"r18_confidence":0.0,"r18_reason":"","confidence":0.93}'
+            )
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_review_session] = override_get_session
+    monkeypatch.setattr("pims_v1.api.review.DeepSeekClient", FakeClient)
+    monkeypatch.setattr(review_api.settings, "deepseek_api_key", "test-key")
+    monkeypatch.setattr(review_api.settings, "keep_root", str(archive_root))
+    try:
+        client = TestClient(app)
+        response = client.post(f"/review/series/{candidate_id}/auto-archive")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["decision_type"] == "auto_apply"
+    assert response.json()["status"] == "confirmed"
+    assert (archive_root / "雪琪SAMA" / "雪琪SAMA 透明女仆 [43P4V234MB]" / "a.jpg").exists()
+
+
+def test_review_archive_overview_api_returns_planning_and_execution_counts(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    candidate = SeriesCandidate(library_id=library_row.id, source_root="/library/set", title="set", status="confirmed")
+    session.add(candidate)
+    session.flush()
+    planning = ArchivePlanningRecord(
+        candidate_id=candidate.id,
+        source_root=candidate.source_root,
+        rule_plan_json="{}",
+        ai_plan_json="{}",
+        final_plan_json='{"title":"set"}',
+        decision_type="auto_apply",
+        rule_score=0.9,
+        ai_score=0.9,
+        risk_score=0.0,
+        decision_reason="agreed",
+    )
+    session.add(planning)
+    session.flush()
+    session.add(
+        ArchiveExecutionRecord(
+            planning_record_id=planning.id,
+            operation_type="archive_move",
+            source_path="/library/set/a.jpg",
+            target_path="/nas/set/a.jpg",
+            status="done",
+        )
+    )
+    session.commit()
+    session.close()
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_review_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.get("/review/archive/overview")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["planning"]["auto_apply"] == 1
+    assert response.json()["executions"]["done"] == 1
+
+
+def test_review_archive_anomalies_api_returns_risk_events(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    candidate = SeriesCandidate(library_id=library_row.id, source_root="/library/r18", title="r18", status="pending_review")
+    session.add(candidate)
+    session.flush()
+    planning = ArchivePlanningRecord(
+        candidate_id=candidate.id,
+        source_root=candidate.source_root,
+        rule_plan_json="{}",
+        ai_plan_json="{}",
+        final_plan_json='{"title":"r18"}',
+        decision_type="manual_review",
+        rule_score=0.9,
+        ai_score=0.9,
+        risk_score=1.0,
+        decision_reason="r18 suspected",
+    )
+    session.add(planning)
+    session.flush()
+    session.add(
+        ArchiveRiskEvent(
+            planning_record_id=planning.id,
+            event_type="r18_suspected",
+            severity="warning",
+            details_json='{"source":"ai"}',
+        )
+    )
+    session.commit()
+    session.close()
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_review_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.get("/review/archive/anomalies")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["event_type"] == "r18_suspected"
+
+
+def test_review_archive_sampling_api_returns_sampled_items(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    candidate = SeriesCandidate(library_id=library_row.id, source_root="/library/set", title="set", status="confirmed")
+    session.add(candidate)
+    session.flush()
+    planning = ArchivePlanningRecord(
+        candidate_id=candidate.id,
+        source_root=candidate.source_root,
+        rule_plan_json="{}",
+        ai_plan_json="{}",
+        final_plan_json='{"title":"set"}',
+        decision_type="auto_apply_sampled",
+        rule_score=0.95,
+        ai_score=0.85,
+        risk_score=0.25,
+        decision_reason="sample review recommended",
+    )
+    session.add(planning)
+    session.flush()
+    session.add(
+        ArchiveRiskEvent(
+            planning_record_id=planning.id,
+            event_type="sample_review_recommended",
+            severity="warning",
+            details_json='{"reason":"title difference"}',
+        )
+    )
+    session.commit()
+    session.close()
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_review_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.get("/review/archive/sampling")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["decision_type"] == "auto_apply_sampled"
+
+
+def test_review_archive_rollback_api_restores_file(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    source_root = tmp_path / "pc" / "set"
+    source_root.mkdir(parents=True)
+    source_file = source_root / "a.jpg"
+    source_file.write_bytes(b"image")
+    archive_root = tmp_path / "nas"
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path=str(tmp_path / "pc"))
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(source_file),
+        current_path=str(source_file),
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=source_file.stat().st_size,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root="D:/图册/雪琪SAMA/雪琪SAMA 透明女仆 [43P4V234MB]",
+        title="雪琪SAMA 透明女仆 [43P4V234MB]",
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.commit()
+    candidate_id = candidate.id
+    session.close()
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        def chat(self, messages):
+            return (
+                '{"title":"雪琪SAMA 透明女仆 [43P4V234MB]","category":"雪琪SAMA",'
+                '"archive_path":"","plan_summary":"保持人物目录结构","risk_flags":[],'
+                '"tags":[],"r18_label":false,"r18_confidence":0.0,"r18_reason":"","confidence":0.93}'
+            )
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_review_session] = override_get_session
+    monkeypatch.setattr("pims_v1.api.review.DeepSeekClient", FakeClient)
+    monkeypatch.setattr(review_api.settings, "deepseek_api_key", "test-key")
+    monkeypatch.setattr(review_api.settings, "keep_root", str(archive_root))
+    try:
+        client = TestClient(app)
+        auto_response = client.post(f"/review/series/{candidate_id}/auto-archive")
+        execution_id = auto_response.json()["execution_ids"][0]
+        rollback_response = client.post(f"/review/archive/executions/{execution_id}/rollback")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert rollback_response.status_code == 200
+    assert rollback_response.json()["status"] == "rolled_back"
+    assert source_file.exists()

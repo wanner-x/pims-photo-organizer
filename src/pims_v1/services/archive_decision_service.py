@@ -10,6 +10,7 @@ from pims_v1.models.archive_decision import (
     ArchiveExecutionRecord,
     ArchivePlanningRecord,
     ArchiveRiskEvent,
+    ArchiveRollbackRecord,
 )
 from pims_v1.models.asset import Asset
 from pims_v1.models.series import Series, SeriesAsset, SeriesCandidate, SeriesCandidateAsset
@@ -154,6 +155,7 @@ def _execute_archive_move(
     )
     moved = 0
     failed = 0
+    execution_ids: list[int] = []
     for row in rows:
         asset = session.get(Asset, row.asset_id)
         if asset is None:
@@ -170,6 +172,8 @@ def _execute_archive_move(
             started_at=datetime.now(UTC),
         )
         session.add(execution)
+        session.flush()
+        execution_ids.append(execution.id)
         try:
             if source.resolve() != destination.resolve():
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -205,6 +209,55 @@ def _execute_archive_move(
         "status": candidate.status,
         "moved": moved,
         "risk_events": 0,
+        "execution_ids": execution_ids,
+    }
+
+
+def rollback_archive_execution(
+    *,
+    session: Session,
+    execution_id: int,
+    operator: str | None = None,
+) -> dict[str, object]:
+    execution = session.get(ArchiveExecutionRecord, execution_id)
+    if execution is None:
+        raise ValueError(f"Archive execution record not found: {execution_id}")
+    if execution.status != "done":
+        raise ValueError(f"Archive execution is not completed: {execution.status}")
+    if not execution.target_path:
+        raise ValueError(f"Archive execution target path is missing: {execution_id}")
+
+    asset = session.query(Asset).filter(Asset.current_path == execution.target_path).one_or_none()
+    if asset is None:
+        raise ValueError(f"Archived asset not found for execution: {execution_id}")
+
+    source = Path(execution.target_path)
+    destination = Path(execution.source_path)
+    if not source.exists():
+        raise ValueError(f"Archived file is missing for execution: {execution_id}")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    source.rename(destination)
+    asset.current_path = str(destination)
+    asset.status = "normal"
+    execution.status = "rolled_back"
+    execution.finished_at = datetime.now(UTC)
+    session.add(
+        ArchiveRollbackRecord(
+            execution_record_id=execution.id,
+            rollback_source_path=str(source),
+            rollback_target_path=str(destination),
+            status="done",
+            operator=operator,
+        )
+    )
+    session.commit()
+    return {
+        "execution_id": execution.id,
+        "asset_id": asset.id,
+        "status": execution.status,
+        "source_path": execution.source_path,
+        "target_path": execution.target_path,
     }
 
 
@@ -236,7 +289,7 @@ def auto_archive_candidate(
         merged=merged,
     )
 
-    if str(merged["decision_type"]) != "auto_apply":
+    if str(merged["decision_type"]) not in {"auto_apply", "auto_apply_sampled"}:
         candidate.status = "pending_review"
         candidate.confidence = max(float(merged["rule_score"]), float(merged["ai_score"]))
         risk_event_count = _create_risk_events(session=session, planning_record=planning_record, merged=merged)
@@ -249,10 +302,18 @@ def auto_archive_candidate(
             "risk_events": risk_event_count,
         }
 
-    return _execute_archive_move(
+    result = _execute_archive_move(
         session=session,
         candidate=candidate,
         planning_record=planning_record,
         merged=merged,
         archive_root=archive_root,
     )
+    if str(merged["decision_type"]) == "auto_apply_sampled":
+        result["risk_events"] = _create_risk_events(
+            session=session,
+            planning_record=planning_record,
+            merged=merged,
+        )
+        session.commit()
+    return result
