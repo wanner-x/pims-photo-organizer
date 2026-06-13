@@ -185,3 +185,58 @@ def test_confirm_series_suggestion_moves_assets_to_archive_and_updates_paths(tmp
     assert suggestion.status == "confirmed"
     assert session.query(Series).one().title == "海边 清晨"
     assert session.query(SeriesAsset).count() == 2
+
+
+def test_confirm_series_suggestion_uses_reviewed_archive_path_when_unchanged(tmp_path):
+    session = make_session(tmp_path)
+    source_root = tmp_path / "pc" / "雪琪SAMA" / "雪琪SAMA 透明女仆 [43P4V234MB]"
+    source_root.mkdir(parents=True)
+    source_file = source_root / "001.jpg"
+    source_file.write_bytes(b"first")
+    archive_root = tmp_path / "nas"
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path / "pc"))
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(source_file),
+        current_path=str(source_file),
+        file_name="001.jpg",
+        file_ext=".jpg",
+        file_size=source_file.stat().st_size,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root=str(source_root),
+        title="雪琪SAMA 透明女仆 [43P4V234MB]",
+        status="ai_suggested",
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id, sort_order=0))
+    suggestion = SeriesSuggestion(
+        candidate_id=candidate.id,
+        suggested_title="雪琪SAMA 透明女仆 [43P4V234MB]",
+        suggested_category="雪琪SAMA",
+        suggested_archive_path=str(archive_root / "雪琪SAMA" / "雪琪SAMA 透明女仆 [43P4V234MB]"),
+        confidence=0.95,
+        status="pending_review",
+    )
+    session.add(suggestion)
+    session.commit()
+
+    result = confirm_series_suggestion(
+        session=session,
+        suggestion_id=suggestion.id,
+        archive_root=str(archive_root),
+        title="雪琪SAMA 透明女仆 [43P4V234MB]",
+        category="雪琪SAMA",
+    )
+
+    destination_dir = archive_root / "雪琪SAMA" / "雪琪SAMA 透明女仆 [43P4V234MB]"
+    assert result["archive_path"] == str(destination_dir)
+    assert (destination_dir / "001.jpg").read_bytes() == b"first"
+    assert not source_file.exists()

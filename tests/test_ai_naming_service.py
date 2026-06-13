@@ -36,6 +36,19 @@ class FakeOrganizationClient:
         )
 
 
+class FakeBadXueqiOrganizationClient:
+    def __init__(self) -> None:
+        self.messages = []
+
+    def chat(self, messages):
+        self.messages = messages
+        return (
+            '{"title":"雪琪SAMA 透明女仆写真","category":"写真合集",'
+            '"archive_path":"写真合集/雪琪SAMA 透明女仆写真",'
+            '"plan_summary":"错误地放入写真合集","risk_flags":[],"confidence":0.92}'
+        )
+
+
 def make_session(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
     Base.metadata.create_all(bind=engine)
@@ -104,6 +117,21 @@ def test_build_series_organization_prompt_requests_reviewable_json():
     assert "写真合集/旧系列" in prompt
 
 
+def test_build_series_organization_prompt_preserves_source_folder_structure():
+    prompt = build_series_organization_prompt(
+        source_root="D:/图册/雪琪SAMA/雪琪SAMA 透明女仆 [43P4V234MB]",
+        file_names=["001.jpg", "002.mp4"],
+        archive_root=r"\\nas\网络写真集",
+        existing_archive_dirs=["雪琪SAMA/雪琪SAMA JK白丝 [46P208MB]"],
+    )
+
+    assert "推荐顶层目录: 雪琪SAMA" in prompt
+    assert "推荐系列目录名: 雪琪SAMA 透明女仆 [43P4V234MB]" in prompt
+    assert "不要追加“写真”" in prompt
+    assert "不要归入“写真合集”" in prompt
+    assert "[43P4V234MB]" in prompt
+
+
 def test_suggest_series_organization_creates_review_suggestion(tmp_path):
     session = make_session(tmp_path)
     library_row = Library(name="Library", kind="local", root_path="/library")
@@ -154,3 +182,45 @@ def test_suggest_series_organization_creates_review_suggestion(tmp_path):
     assert suggestion.risk_flags == '["目标目录可能已存在"]'
     assert candidate.status == "ai_suggested"
     assert candidate.title == "清晨海边写真"
+
+
+def test_suggest_series_organization_overrides_generic_ai_for_named_parent_series(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path="/library/雪琪SAMA/雪琪SAMA 透明女仆 [43P4V234MB]/001.jpg",
+        current_path="/library/雪琪SAMA/雪琪SAMA 透明女仆 [43P4V234MB]/001.jpg",
+        file_name="001.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root="/library/雪琪SAMA/雪琪SAMA 透明女仆 [43P4V234MB]",
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.commit()
+    client = FakeBadXueqiOrganizationClient()
+
+    result = suggest_series_organization(
+        session=session,
+        candidate_id=candidate.id,
+        client=client,
+        archive_root="/nas/archive",
+    )
+
+    suggestion = session.query(SeriesSuggestion).one()
+    assert result["title"] == "雪琪SAMA 透明女仆 [43P4V234MB]"
+    assert result["category"] == "雪琪SAMA"
+    assert result["archive_path"] == "/nas/archive/雪琪SAMA/雪琪SAMA 透明女仆 [43P4V234MB]"
+    assert suggestion.suggested_title == "雪琪SAMA 透明女仆 [43P4V234MB]"
+    assert suggestion.suggested_category == "雪琪SAMA"
+    assert suggestion.suggested_archive_path == "/nas/archive/雪琪SAMA/雪琪SAMA 透明女仆 [43P4V234MB]"
