@@ -876,6 +876,82 @@ def test_run_safe_workflow_cli_builds_duplicate_plan(tmp_path, capsys, monkeypat
     assert "duplicate_plan.operations=1" in output
 
 
+def test_run_safe_workflow_cli_reports_batch_auto_archive_summary(tmp_path, capsys, monkeypatch):
+    from PIL import Image
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "workflow-auto.db"
+    database_url = f"sqlite:///{db_path}"
+    archive_root = tmp_path / "nas"
+    source_dir = tmp_path / "pc" / "Alice" / "Alice Set [8P]"
+    source_dir.mkdir(parents=True)
+    source_file = source_dir / "001.jpg"
+    Image.new("RGB", (16, 16), color="white").save(source_file)
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path / "pc"))
+    session.add(library_row)
+    session.flush()
+    session.add(
+        Asset(
+            library_id=library_row.id,
+            original_path=str(source_file),
+            current_path=str(source_file),
+            file_name=source_file.name,
+            file_ext=source_file.suffix,
+            file_size=source_file.stat().st_size,
+            mtime=1.0,
+        )
+    )
+    session.commit()
+    session.close()
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def chat(self, messages):
+            return (
+                '{"title":"Alice Set [8P]","category":"Alice",'
+                '"archive_path":"","plan_summary":"keep person bucket","risk_flags":[],'
+                '"tags":[],"r18_label":false,"r18_confidence":0.0,"r18_reason":"","confidence":0.93}'
+            )
+
+    monkeypatch.setattr("pims_v1.cli.DeepSeekClient", FakeClient)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pims",
+            "run-safe-workflow",
+            "--keep-root",
+            str(archive_root),
+            "--cache-root",
+            str(tmp_path / ".cache"),
+            "--md5-limit",
+            "10",
+            "--phash-limit",
+            "10",
+            "--thumbnail-limit",
+            "10",
+            "--min-series-assets",
+            "1",
+            "--auto-archive-limit",
+            "5",
+            "--database-url",
+            database_url,
+        ],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "archive_auto.processed=1" in output
+    assert "archive_auto.auto_apply=1" in output
+
+
 def test_backup_db_cli_copies_sqlite_database(tmp_path, capsys, monkeypatch):
     database = tmp_path / "pims.db"
     database.write_bytes(b"sqlite-data")

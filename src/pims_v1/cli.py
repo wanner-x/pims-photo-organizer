@@ -151,6 +151,7 @@ def build_parser() -> ArgumentParser:
     safe_workflow.add_argument("--phash-limit", type=int, default=1000)
     safe_workflow.add_argument("--thumbnail-limit", type=int, default=1000)
     safe_workflow.add_argument("--min-series-assets", type=int, default=2)
+    safe_workflow.add_argument("--auto-archive-limit", type=int, default=20)
     safe_workflow.add_argument("--similar-threshold", type=int, default=6)
     safe_workflow.add_argument("--database-url", default=settings.database_url)
 
@@ -645,6 +646,7 @@ def run_safe_workflow_command(
     phash_limit: int,
     thumbnail_limit: int,
     min_series_assets: int,
+    auto_archive_limit: int,
     similar_threshold: int,
     database_url: str,
 ) -> int:
@@ -660,6 +662,15 @@ def run_safe_workflow_command(
         )
 
     session = make_session(database_url)
+    archive_client = None
+    if keep_root and auto_archive_limit > 0:
+        archive_client = DeepSeekClient(
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+            model=settings.deepseek_model,
+            reasoning_effort=settings.deepseek_reasoning_effort,
+            thinking_enabled=settings.deepseek_thinking_enabled,
+        )
     try:
         summary = run_safe_workflow(
             session=session,
@@ -669,7 +680,9 @@ def run_safe_workflow_command(
             phash_limit=phash_limit,
             thumbnail_limit=thumbnail_limit,
             min_series_assets=min_series_assets,
+            auto_archive_limit=auto_archive_limit,
             similar_threshold=similar_threshold,
+            archive_client=archive_client,
             progress_callback=print_progress,
         )
     finally:
@@ -799,6 +812,7 @@ def main() -> int:
             phash_limit=args.phash_limit,
             thumbnail_limit=args.thumbnail_limit,
             min_series_assets=args.min_series_assets,
+            auto_archive_limit=args.auto_archive_limit,
             similar_threshold=args.similar_threshold,
             database_url=args.database_url,
         )

@@ -261,6 +261,60 @@ def rollback_archive_execution(
     }
 
 
+def auto_archive_candidates(
+    *,
+    session: Session,
+    archive_root: str,
+    client: NamingClient,
+    limit: int = 20,
+    candidate_statuses: tuple[str, ...] = ("pending", "ai_suggested"),
+) -> dict[str, int]:
+    candidate_ids = [
+        row[0]
+        for row in (
+            session.query(SeriesCandidate.id)
+            .filter(SeriesCandidate.status.in_(candidate_statuses))
+            .order_by(SeriesCandidate.id)
+            .limit(limit)
+            .all()
+        )
+    ]
+    summary = {
+        "considered": len(candidate_ids),
+        "processed": 0,
+        "auto_apply": 0,
+        "auto_apply_sampled": 0,
+        "manual_review": 0,
+        "confirmed": 0,
+        "pending_review": 0,
+        "failed": 0,
+        "moved": 0,
+        "risk_events": 0,
+    }
+    for candidate_id in candidate_ids:
+        try:
+            result = auto_archive_candidate(
+                session=session,
+                candidate_id=candidate_id,
+                archive_root=archive_root,
+                client=client,
+            )
+        except Exception:
+            session.rollback()
+            summary["failed"] += 1
+            continue
+        summary["processed"] += 1
+        decision_type = str(result.get("decision_type", ""))
+        status = str(result.get("status", ""))
+        if decision_type in summary:
+            summary[decision_type] += 1
+        if status in summary:
+            summary[status] += 1
+        summary["moved"] += int(result.get("moved", 0))
+        summary["risk_events"] += int(result.get("risk_events", 0))
+    return summary
+
+
 def auto_archive_candidate(
     *,
     session: Session,

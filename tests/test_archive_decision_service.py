@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -14,7 +15,11 @@ from pims_v1.models.archive_decision import (
 from pims_v1.models.asset import Asset
 from pims_v1.models.library import Library
 from pims_v1.models.series import Series, SeriesCandidate, SeriesCandidateAsset
-from pims_v1.services.archive_decision_service import auto_archive_candidate, rollback_archive_execution
+from pims_v1.services.archive_decision_service import (
+    auto_archive_candidate,
+    auto_archive_candidates,
+    rollback_archive_execution,
+)
 
 
 class StaticAIPlanClient:
@@ -23,6 +28,16 @@ class StaticAIPlanClient:
 
     def chat(self, messages):
         return json.dumps(self.payload, ensure_ascii=False)
+
+
+class SequencedAIPlanClient:
+    def __init__(self, payloads: list[dict]) -> None:
+        self.payloads = list(payloads)
+
+    def chat(self, messages):
+        if not self.payloads:
+            raise AssertionError("No AI payload left for batch test")
+        return json.dumps(self.payloads.pop(0), ensure_ascii=False)
 
 
 def make_session(tmp_path):
@@ -65,6 +80,42 @@ def build_candidate_fixture(tmp_path, source_root: str = "D:/图册/雪琪SAMA/�
     session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id, sort_order=0))
     session.commit()
     return session, candidate.id, archive_root
+
+
+def build_extra_candidate(
+    *,
+    session,
+    source_root: str,
+    title: str,
+    file_name: str,
+    status: str = "pending",
+) -> SeriesCandidate:
+    library_row = session.query(Library).one()
+    file_path = Path(library_row.root_path) / "batch" / file_name
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(file_name.encode("utf-8"))
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(file_path),
+        current_path=str(file_path),
+        file_name=file_name,
+        file_ext=file_path.suffix,
+        file_size=file_path.stat().st_size,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root=source_root,
+        title=title,
+        status=status,
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id, sort_order=0))
+    session.commit()
+    return candidate
 
 
 def test_auto_archive_candidate_applies_when_rule_and_ai_agree(tmp_path):
@@ -142,6 +193,74 @@ def test_auto_archive_candidate_blocks_r18_suspicion(tmp_path):
     assert planning_row.decision_type == "manual_review"
     assert risk_row.event_type == "r18_suspected"
     assert session.query(ArchiveExecutionRecord).count() == 0
+
+
+def test_auto_archive_candidates_processes_only_pending_candidates(tmp_path):
+    session, candidate_id, archive_root = build_candidate_fixture(
+        tmp_path,
+        source_root="D:/photos/Alice/Alice Set [8P]",
+    )
+    build_extra_candidate(
+        session=session,
+        source_root="D:/photos/Bob/Bob R18 Set [9P]",
+        title="Bob R18 Set [9P]",
+        file_name="002.jpg",
+        status="pending",
+    )
+    confirmed_candidate = build_extra_candidate(
+        session=session,
+        source_root="D:/photos/Done/Archived Set [10P]",
+        title="Archived Set [10P]",
+        file_name="003.jpg",
+        status="confirmed",
+    )
+    client = SequencedAIPlanClient(
+        [
+            {
+                "title": "Alice Set [8P]",
+                "category": "Alice",
+                "archive_path": "",
+                "plan_summary": "keep person bucket",
+                "risk_flags": [],
+                "tags": [],
+                "r18_label": False,
+                "r18_confidence": 0.0,
+                "r18_reason": "",
+                "confidence": 0.93,
+            },
+            {
+                "title": "Bob R18 Set [9P]",
+                "category": "Bob",
+                "archive_path": "",
+                "plan_summary": "suspected adult content",
+                "risk_flags": ["r18_suspected"],
+                "tags": ["R18"],
+                "r18_label": True,
+                "r18_confidence": 0.91,
+                "r18_reason": "folder name contains R18",
+                "confidence": 0.90,
+            },
+        ]
+    )
+
+    summary = auto_archive_candidates(
+        session=session,
+        archive_root=str(archive_root),
+        client=client,
+        limit=10,
+    )
+
+    first_candidate = session.get(SeriesCandidate, candidate_id)
+    assert summary["considered"] == 2
+    assert summary["processed"] == 2
+    assert summary["auto_apply"] == 1
+    assert summary["manual_review"] == 1
+    assert summary["confirmed"] == 1
+    assert summary["pending_review"] == 1
+    assert summary["moved"] == 1
+    assert first_candidate.status == "confirmed"
+    assert session.get(SeriesCandidate, confirmed_candidate.id).status == "confirmed"
+    assert session.query(ArchivePlanningRecord).count() == 2
 
 
 def test_rollback_archive_execution_restores_original_asset_path(tmp_path):

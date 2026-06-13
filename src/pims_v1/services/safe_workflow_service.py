@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from pims_v1.config import settings
 from pims_v1.models.asset import Asset
 from pims_v1.models.processing import ProcessingTask
+from pims_v1.services.ai_naming_service import NamingClient
+from pims_v1.services.archive_decision_service import auto_archive_candidates
 from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
 from pims_v1.services.notification_service import notify_duplicate_approval_needed
 from pims_v1.services.operation_plan_service import create_duplicate_quarantine_plan
@@ -18,6 +20,21 @@ from pims_v1.services.thumbnail_service import ensure_thumbnail
 
 
 ProgressCallback = Callable[[dict[str, int | str]], None]
+
+
+def _empty_archive_auto_summary() -> dict[str, int]:
+    return {
+        "considered": 0,
+        "processed": 0,
+        "auto_apply": 0,
+        "auto_apply_sampled": 0,
+        "manual_review": 0,
+        "confirmed": 0,
+        "pending_review": 0,
+        "failed": 0,
+        "moved": 0,
+        "risk_events": 0,
+    }
 
 
 def _active_task_subject_ids(session: Session, task_type: str, asset_ids: list[int]) -> set[int]:
@@ -119,8 +136,10 @@ def run_safe_workflow(
     phash_limit: int = 1000,
     thumbnail_limit: int = 1000,
     min_series_assets: int = 2,
+    auto_archive_limit: int = 20,
     similar_threshold: int = 6,
     stale_after_seconds: int = 300,
+    archive_client: NamingClient | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, dict[str, int]]:
     recovered = recover_stale_tasks(session, stale_after_seconds=stale_after_seconds)
@@ -140,6 +159,14 @@ def run_safe_workflow(
     similar = build_similar_image_reviews(session=session, threshold=similar_threshold)
     series = build_series_candidates(session=session, min_assets=min_series_assets)
     thumbnails = _build_thumbnails(session=session, cache_root=cache_root, limit=thumbnail_limit)
+    archive_auto = _empty_archive_auto_summary()
+    if keep_root and auto_archive_limit > 0 and archive_client is not None:
+        archive_auto = auto_archive_candidates(
+            session=session,
+            archive_root=keep_root,
+            client=archive_client,
+            limit=auto_archive_limit,
+        )
 
     duplicate_plan = {"batch_id": 0, "operations": 0}
     if keep_root:
@@ -156,6 +183,7 @@ def run_safe_workflow(
         "similar": similar,
         "series": series,
         "thumbnails": thumbnails,
+        "archive_auto": archive_auto,
         "duplicate_plan": duplicate_plan,
         "notification": notification,
     }

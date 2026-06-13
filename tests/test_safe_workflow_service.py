@@ -7,8 +7,18 @@ from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup
 from pims_v1.models.library import Library
 from pims_v1.models.operation import Operation
-from pims_v1.models.series import SeriesCandidate
+from pims_v1.models.series import Series, SeriesCandidate
 from pims_v1.services.safe_workflow_service import run_safe_workflow
+
+
+class StaticAIPlanClient:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    def chat(self, messages):
+        import json
+
+        return json.dumps(self.payload, ensure_ascii=False)
 
 
 def make_session(tmp_path):
@@ -196,3 +206,61 @@ def test_run_safe_workflow_only_enqueues_images_for_phash(tmp_path):
     assert summary["phash_enqueued"]["queued"] == 1
     assert summary["phash"]["processed"] == 1
     assert summary["phash"]["skipped_non_image"] == 0
+
+
+def test_run_safe_workflow_executes_batch_auto_archive_when_enabled(tmp_path):
+    from PIL import Image
+
+    session = make_session(tmp_path)
+    archive_root = tmp_path / "nas"
+    source_dir = tmp_path / "pc" / "Alice" / "Alice Set [8P]"
+    source_dir.mkdir(parents=True)
+    source_file = source_dir / "001.jpg"
+    Image.new("RGB", (16, 16), color="white").save(source_file)
+
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path / "pc"))
+    session.add(library_row)
+    session.flush()
+    session.add(
+        Asset(
+            library_id=library_row.id,
+            original_path=str(source_file),
+            current_path=str(source_file),
+            file_name=source_file.name,
+            file_ext=source_file.suffix,
+            file_size=source_file.stat().st_size,
+            mtime=1.0,
+        )
+    )
+    session.commit()
+
+    summary = run_safe_workflow(
+        session=session,
+        keep_root=str(archive_root),
+        cache_root=tmp_path / ".cache",
+        md5_limit=10,
+        phash_limit=10,
+        thumbnail_limit=10,
+        min_series_assets=1,
+        auto_archive_limit=5,
+        archive_client=StaticAIPlanClient(
+            {
+                "title": "Alice Set [8P]",
+                "category": "Alice",
+                "archive_path": "",
+                "plan_summary": "keep person bucket",
+                "risk_flags": [],
+                "tags": [],
+                "r18_label": False,
+                "r18_confidence": 0.0,
+                "r18_reason": "",
+                "confidence": 0.93,
+            }
+        ),
+    )
+
+    assert summary["series"]["candidates"] == 1
+    assert summary["archive_auto"]["processed"] == 1
+    assert summary["archive_auto"]["auto_apply"] == 1
+    assert summary["archive_auto"]["moved"] == 1
+    assert session.query(Series).count() == 1
