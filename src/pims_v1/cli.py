@@ -10,6 +10,7 @@ from pims_v1.db import ensure_database_schema
 from pims_v1.config import settings
 from pims_v1 import models
 from pims_v1.services.ai_naming_service import suggest_series_title
+from pims_v1.services.archive_decision_service import auto_archive_candidate
 from pims_v1.services.backup_service import backup_sqlite_database
 from pims_v1.services.deepseek_client import DeepSeekClient
 from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
@@ -137,6 +138,11 @@ def build_parser() -> ArgumentParser:
     confirm_series.add_argument("candidate_id", type=int)
     confirm_series.add_argument("--archive-root", required=True)
     confirm_series.add_argument("--database-url", default=settings.database_url)
+
+    auto_archive_series = subparsers.add_parser("auto-archive-series")
+    auto_archive_series.add_argument("candidate_id", type=int)
+    auto_archive_series.add_argument("--archive-root", required=True)
+    auto_archive_series.add_argument("--database-url", default=settings.database_url)
 
     safe_workflow = subparsers.add_parser("run-safe-workflow")
     safe_workflow.add_argument("--keep-root", default=settings.keep_root)
@@ -603,6 +609,34 @@ def run_confirm_series(candidate_id: int, archive_root: str, database_url: str) 
     return 0
 
 
+def run_auto_archive_series(candidate_id: int, archive_root: str, database_url: str) -> int:
+    session = make_session(database_url)
+    client = DeepSeekClient(
+        api_key=settings.deepseek_api_key,
+        base_url=settings.deepseek_base_url,
+        model=settings.deepseek_model,
+        reasoning_effort=settings.deepseek_reasoning_effort,
+        thinking_enabled=settings.deepseek_thinking_enabled,
+    )
+    try:
+        result = auto_archive_candidate(
+            session=session,
+            candidate_id=candidate_id,
+            archive_root=archive_root,
+            client=client,
+        )
+    finally:
+        session.close()
+
+    print(f"candidate_id={result['candidate_id']}")
+    print(f"decision_type={result['decision_type']}")
+    print(f"status={result['status']}")
+    print(f"moved={result['moved']}")
+    if "archive_path" in result:
+        print(f"archive_path={result['archive_path']}")
+    return 0
+
+
 def run_safe_workflow_command(
     *,
     keep_root: str | None,
@@ -747,6 +781,12 @@ def main() -> int:
         )
     if args.command == "confirm-series":
         return run_confirm_series(
+            candidate_id=args.candidate_id,
+            archive_root=args.archive_root,
+            database_url=args.database_url,
+        )
+    if args.command == "auto-archive-series":
+        return run_auto_archive_series(
             candidate_id=args.candidate_id,
             archive_root=args.archive_root,
             database_url=args.database_url,

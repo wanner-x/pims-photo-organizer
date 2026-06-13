@@ -229,6 +229,39 @@ def _existing_archive_dirs(session: Session, archive_root: str | None, limit: in
     return result
 
 
+def generate_ai_archive_plan(
+    *,
+    source_root: str,
+    file_names: list[str],
+    archive_root: str | None,
+    existing_archive_dirs: list[str],
+    client: NamingClient,
+) -> dict[str, str | float | bool | list[str] | None]:
+    prompt = build_series_organization_prompt(
+        source_root=source_root,
+        file_names=file_names,
+        archive_root=archive_root,
+        existing_archive_dirs=existing_archive_dirs,
+    )
+    raw_response = client.chat([{"role": "user", "content": prompt}])
+    parsed = _parse_organization_response(raw_response)
+    policy = _source_folder_policy(source_root)
+    reviewed_title, reviewed_category = _reviewed_title_and_category(parsed, policy)
+    return {
+        "title": reviewed_title,
+        "category": reviewed_category,
+        "archive_path": _archive_path_preview(archive_root, reviewed_category, reviewed_title) if archive_root else None,
+        "plan_summary": str(parsed.get("plan_summary", "")),
+        "risk_flags": list(parsed.get("risk_flags", [])),
+        "tags": list(parsed.get("tags", [])),
+        "r18_label": bool(parsed.get("r18_label", False)),
+        "r18_confidence": float(parsed.get("r18_confidence", 0.0)),
+        "r18_reason": str(parsed.get("r18_reason", "")),
+        "confidence": float(parsed["confidence"]),
+        "raw_response": raw_response,
+    }
+
+
 def suggest_series_title(
     *,
     session: Session,
@@ -271,10 +304,13 @@ def suggest_series_organization(
         archive_root=archive_root,
         existing_archive_dirs=_existing_archive_dirs(session, archive_root),
     )
-    raw_response = client.chat([{"role": "user", "content": prompt}])
-    parsed = _parse_organization_response(raw_response)
-    policy = _source_folder_policy(candidate.source_root)
-    reviewed_title, reviewed_category = _reviewed_title_and_category(parsed, policy)
+    raw_plan = generate_ai_archive_plan(
+        source_root=candidate.source_root,
+        file_names=_candidate_sample_file_names(session, candidate_id),
+        archive_root=archive_root,
+        existing_archive_dirs=_existing_archive_dirs(session, archive_root),
+        client=client,
+    )
 
     suggestion = (
         session.query(SeriesSuggestion)
@@ -284,22 +320,18 @@ def suggest_series_organization(
     if suggestion is None:
         suggestion = SeriesSuggestion(candidate_id=candidate_id)
         session.add(suggestion)
-    suggestion.suggested_title = reviewed_title
-    suggestion.suggested_category = reviewed_category
-    suggestion.suggested_archive_path = (
-        _archive_path_preview(archive_root, suggestion.suggested_category, suggestion.suggested_title)
-        if archive_root
-        else None
-    )
-    suggestion.plan_summary = str(parsed.get("plan_summary", ""))
-    suggestion.risk_flags = json.dumps(parsed.get("risk_flags", []), ensure_ascii=False)
-    suggestion.content_tags = json.dumps(parsed.get("tags", []), ensure_ascii=False)
-    suggestion.r18_label = bool(parsed.get("r18_label", False))
-    suggestion.r18_confidence = float(parsed.get("r18_confidence", 0.0))
-    suggestion.r18_reason = str(parsed.get("r18_reason", ""))
-    suggestion.confidence = float(parsed["confidence"])
+    suggestion.suggested_title = str(raw_plan["title"])
+    suggestion.suggested_category = str(raw_plan["category"])
+    suggestion.suggested_archive_path = str(raw_plan["archive_path"]) if raw_plan["archive_path"] else None
+    suggestion.plan_summary = str(raw_plan.get("plan_summary", ""))
+    suggestion.risk_flags = json.dumps(raw_plan.get("risk_flags", []), ensure_ascii=False)
+    suggestion.content_tags = json.dumps(raw_plan.get("tags", []), ensure_ascii=False)
+    suggestion.r18_label = bool(raw_plan.get("r18_label", False))
+    suggestion.r18_confidence = float(raw_plan.get("r18_confidence", 0.0))
+    suggestion.r18_reason = str(raw_plan.get("r18_reason", ""))
+    suggestion.confidence = float(raw_plan["confidence"])
     suggestion.status = "pending_review"
-    suggestion.raw_response = raw_response
+    suggestion.raw_response = str(raw_plan["raw_response"])
     candidate.title = suggestion.suggested_title
     candidate.status = "ai_suggested"
     candidate.confidence = suggestion.confidence

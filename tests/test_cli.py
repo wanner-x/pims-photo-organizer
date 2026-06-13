@@ -733,6 +733,83 @@ def test_confirm_series_cli_creates_series(tmp_path, capsys, monkeypatch):
     assert session.query(Series).count() == 1
 
 
+def test_auto_archive_series_cli_executes_dual_engine_archive(tmp_path, capsys, monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "auto-archive.db"
+    database_url = f"sqlite:///{db_path}"
+    archive_root = tmp_path / "nas"
+    source_root = tmp_path / "pc" / "source"
+    source_root.mkdir(parents=True)
+    source_file = source_root / "001.jpg"
+    source_file.write_bytes(b"sample")
+
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path / "pc"))
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(source_file),
+        current_path=str(source_file),
+        file_name="001.jpg",
+        file_ext=".jpg",
+        file_size=source_file.stat().st_size,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+
+    from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset
+
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root="D:/图册/雪琪SAMA/雪琪SAMA 透明女仆 [43P4V234MB]",
+        title="雪琪SAMA 透明女仆 [43P4V234MB]",
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.commit()
+    candidate_id = candidate.id
+    session.close()
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def chat(self, messages):
+            return (
+                '{"title":"雪琪SAMA 透明女仆 [43P4V234MB]","category":"雪琪SAMA",'
+                '"archive_path":"","plan_summary":"保持人物目录结构","risk_flags":[],'
+                '"tags":[],"r18_label":false,"r18_confidence":0.0,"r18_reason":"","confidence":0.93}'
+            )
+
+    monkeypatch.setattr("pims_v1.cli.DeepSeekClient", FakeClient)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pims",
+            "auto-archive-series",
+            str(candidate_id),
+            "--archive-root",
+            str(archive_root),
+            "--database-url",
+            database_url,
+        ],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "decision_type=auto_apply" in output
+    assert "status=confirmed" in output
+
+
 def test_run_safe_workflow_cli_builds_duplicate_plan(tmp_path, capsys, monkeypatch):
     from PIL import Image
     from sqlalchemy import create_engine

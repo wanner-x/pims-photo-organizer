@@ -32,6 +32,12 @@ def ensure_database_schema(bind=engine) -> None:
             ON notification_records (channel, event_type, subject_type, subject_id)
             """
         )
+        connection.exec_driver_sql(
+            """
+            CREATE INDEX IF NOT EXISTS ix_archive_planning_records_decision_type_created_at
+            ON archive_planning_records (decision_type, created_at)
+            """
+        )
 
 
 __all__ = ["Base", "SessionLocal", "engine", "ensure_database_schema"]

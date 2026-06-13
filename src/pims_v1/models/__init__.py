@@ -1,3 +1,9 @@
+from pims_v1.models.archive_decision import (
+    ArchiveExecutionRecord,
+    ArchivePlanningRecord,
+    ArchiveRiskEvent,
+    ArchiveRollbackRecord,
+)
 from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
@@ -9,6 +15,10 @@ from pims_v1.models.similar import SimilarGroup, SimilarGroupAsset
 from pims_v1.models.series import Series, SeriesAsset, SeriesCandidate, SeriesCandidateAsset, SeriesSuggestion
 
 __all__ = [
+    "ArchiveExecutionRecord",
+    "ArchivePlanningRecord",
+    "ArchiveRiskEvent",
+    "ArchiveRollbackRecord",
     "Asset",
     "DuplicateGroup",
     "DuplicateGroupAsset",

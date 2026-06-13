@@ -2,7 +2,7 @@ from sqlalchemy import inspect
 from sqlalchemy import create_engine
 
 from pims_v1.db import Base, ensure_database_schema
-from pims_v1.models import asset, duplicate, library, notification, operation, processing, review, series
+from pims_v1.models import archive_decision, asset, duplicate, library, notification, operation, processing, review, series
 
 
 def test_core_tables_exist(tmp_path):
@@ -24,6 +24,10 @@ def test_core_tables_exist(tmp_path):
     assert "similar_groups" in table_names
     assert "series_candidate_assets" in table_names
     assert "series_suggestions" in table_names
+    assert "archive_planning_records" in table_names
+    assert "archive_execution_records" in table_names
+    assert "archive_rollback_records" in table_names
+    assert "archive_risk_events" in table_names
 
 
 def test_notification_records_have_business_unique_index(tmp_path):
@@ -69,3 +73,13 @@ def test_ensure_database_schema_adds_series_suggestion_tag_columns(tmp_path):
     column_names = {column["name"] for column in inspector.get_columns("series_suggestions")}
 
     assert {"content_tags", "r18_label", "r18_confidence", "r18_reason"}.issubset(column_names)
+
+
+def test_archive_planning_records_have_decision_index(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'schema.db'}", future=True)
+
+    ensure_database_schema(engine)
+    inspector = inspect(engine)
+    indexes = inspector.get_indexes("archive_planning_records")
+
+    assert any(index["name"] == "ix_archive_planning_records_decision_type_created_at" for index in indexes)
