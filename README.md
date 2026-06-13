@@ -2,6 +2,8 @@
 
 PIMS V1 is a PC-hosted, NAS-centered photo organization system for large personal libraries.
 
+For the current implementation status, handoff context, known risks, and roadmap, read [Project Status And Roadmap](docs/PROJECT_STATUS_AND_ROADMAP.md).
+
 ## Local Run
 
 1. Create a Python 3.11 virtual environment.
