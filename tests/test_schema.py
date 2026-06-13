@@ -28,6 +28,8 @@ def test_core_tables_exist(tmp_path):
     assert "archive_execution_records" in table_names
     assert "archive_rollback_records" in table_names
     assert "archive_risk_events" in table_names
+    assert "series_moderation_runs" in table_names
+    assert "series_moderation_samples" in table_names
 
 
 def test_notification_records_have_business_unique_index(tmp_path):
@@ -83,3 +85,13 @@ def test_archive_planning_records_have_decision_index(tmp_path):
     indexes = inspector.get_indexes("archive_planning_records")
 
     assert any(index["name"] == "ix_archive_planning_records_decision_type_created_at" for index in indexes)
+
+
+def test_series_moderation_runs_have_candidate_index(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'schema.db'}", future=True)
+
+    ensure_database_schema(engine)
+    inspector = inspect(engine)
+    indexes = inspector.get_indexes("series_moderation_runs")
+
+    assert any(index["name"] == "ix_series_moderation_runs_candidate_created_at" for index in indexes)

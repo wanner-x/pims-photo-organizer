@@ -16,6 +16,7 @@ from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
 from pims_v1.models.operation import Operation, OperationBatch
 from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset, SeriesSuggestion
+from pims_v1.models.series_moderation import SeriesModerationRun
 
 
 def test_review_routes_exist():
@@ -227,6 +228,10 @@ def test_review_ui_page_exists():
     assert "content-tags" in response.text
     assert "plan-summary" in response.text
     assert "risk-flags" in response.text
+    assert "rule-plan" in response.text
+    assert "series-filter" in response.text
+    assert "needs_ai" in response.text
+    assert "target_conflict" in response.text
     assert "审核功能导航" in response.text
     assert "data-view-target=\"series\"" in response.text
     assert "data-view-panel=\"duplicates\"" in response.text
@@ -284,6 +289,8 @@ def test_review_ui_includes_archive_anomaly_and_ledger_views():
     assert "loadArchiveAnomalies" in response.text
     assert "loadArchiveLedger" in response.text
     assert "rollbackExecution" in response.text
+    assert "scan-r18" in response.text
+    assert "moderation-provider" in response.text
 
 
 def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
@@ -705,6 +712,49 @@ def test_review_series_suggest_ai_api_creates_pending_suggestion(tmp_path, monke
     assert session.query(SeriesSuggestion).one().status == "pending_review"
 
 
+def test_review_series_api_filters_needs_ai_candidates(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    first = SeriesCandidate(library_id=library_row.id, source_root="/library/needs-ai", title="needs-ai")
+    second = SeriesCandidate(library_id=library_row.id, source_root="/library/has-ai", title="has-ai", status="ai_suggested")
+    session.add_all([first, second])
+    session.flush()
+    session.add(
+        SeriesSuggestion(
+            candidate_id=second.id,
+            suggested_title="Has AI",
+            suggested_category="People",
+            confidence=0.9,
+            status="pending_review",
+        )
+    )
+    session.commit()
+    first_id = first.id
+    session.close()
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_review_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.get("/review/series", params={"filter": "needs_ai"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [first_id]
+
+
 def test_review_series_confirm_suggestion_api_moves_assets_to_keep_root(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
     Base.metadata.create_all(bind=engine)
@@ -835,6 +885,66 @@ def test_review_auto_archive_series_api_executes_dual_engine_archive(tmp_path, m
     assert response.json()["decision_type"] == "auto_apply"
     assert response.json()["status"] == "confirmed"
     assert (archive_root / "雪琪SAMA" / "雪琪SAMA 透明女仆 [43P4V234MB]" / "a.jpg").exists()
+
+
+def test_review_series_scan_r18_api_persists_latest_moderation(tmp_path, monkeypatch):
+    from PIL import Image
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    source_root = tmp_path / "pc" / "set"
+    source_root.mkdir(parents=True)
+    source_file = source_root / "a.jpg"
+    Image.new("RGB", (16, 16), color=(220, 180, 160)).save(source_file)
+    session = session_factory()
+    library_row = Library(name="Library", kind="local", root_path=str(tmp_path / "pc"))
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(source_file),
+        current_path=str(source_file),
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=source_file.stat().st_size,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(library_id=library_row.id, source_root=str(source_root), title="set")
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.commit()
+    candidate_id = candidate.id
+    session.close()
+
+    class FakeVisualClient:
+        provider_name = "static"
+
+        def moderate_image(self, path):
+            return {"label": "nsfw_suspected", "score": 0.91, "reason": "test", "provider": self.provider_name}
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_review_session] = override_get_session
+    monkeypatch.setattr("pims_v1.api.review.build_visual_moderation_client", lambda provider_name="auto": FakeVisualClient())
+    try:
+        client = TestClient(app)
+        response = client.post(f"/review/series/{candidate_id}/scan-r18")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["r18_label"] is True
+    session = session_factory()
+    assert session.query(SeriesModerationRun).one().flagged_samples == 1
 
 
 def test_review_archive_overview_api_returns_planning_and_execution_counts(tmp_path):

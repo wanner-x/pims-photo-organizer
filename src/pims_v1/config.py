@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-v4-pro"
     deepseek_reasoning_effort: str = "high"
     deepseek_thinking_enabled: bool = True
+    ai_suggest_limit: int = 0
+    r18_provider: str = "auto"
+    r18_sample_limit: int = 7
+    r18_high_threshold: float = 0.82
+    r18_review_threshold: float = 0.55
+    r18_scan_limit: int = 0
     wechat_webhook_url: str | None = None
     review_url: str = "http://127.0.0.1:8000/review-ui"
 

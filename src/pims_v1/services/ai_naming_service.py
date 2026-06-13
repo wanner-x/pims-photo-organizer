@@ -350,3 +350,47 @@ def suggest_series_organization(
         "r18_reason": suggestion.r18_reason,
         "confidence": suggestion.confidence,
     }
+
+
+def suggest_series_organization_candidates(
+    *,
+    session: Session,
+    client: NamingClient,
+    archive_root: str | None = None,
+    limit: int = 20,
+    candidate_statuses: tuple[str, ...] = ("pending",),
+) -> dict[str, int]:
+    candidate_ids = [
+        row[0]
+        for row in (
+            session.query(SeriesCandidate.id)
+            .outerjoin(SeriesSuggestion, SeriesSuggestion.candidate_id == SeriesCandidate.id)
+            .filter(SeriesCandidate.status.in_(candidate_statuses))
+            .filter(SeriesSuggestion.id.is_(None))
+            .order_by(SeriesCandidate.id)
+            .limit(limit)
+            .all()
+        )
+    ]
+    summary = {
+        "considered": len(candidate_ids),
+        "processed": 0,
+        "suggested": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
+    for candidate_id in candidate_ids:
+        try:
+            suggest_series_organization(
+                session=session,
+                candidate_id=candidate_id,
+                client=client,
+                archive_root=archive_root,
+            )
+        except Exception:
+            session.rollback()
+            summary["failed"] += 1
+            continue
+        summary["processed"] += 1
+        summary["suggested"] += 1
+    return summary

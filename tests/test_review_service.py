@@ -7,6 +7,7 @@ from pims_v1.models.archive_decision import ArchiveExecutionRecord, ArchivePlann
 from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
+from pims_v1.models.series_moderation import SeriesModerationRun
 from pims_v1.models.similar import SimilarGroup, SimilarGroupAsset
 from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset, SeriesSuggestion
 from pims_v1.services.review_service import (
@@ -184,6 +185,133 @@ def test_list_series_review_candidates_hides_confirmed_by_default(tmp_path):
     candidates = list_series_review_candidates(session, limit=10)
 
     assert candidates == []
+
+
+def test_list_series_review_candidates_includes_latest_moderation_summary(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path="/library/set1/a.jpg",
+        current_path="/library/set1/a.jpg",
+        file_name="a.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root="/library/set1",
+        title="set1",
+        status="pending_review",
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id, sort_order=0))
+    session.add(
+        SeriesModerationRun(
+            candidate_id=candidate.id,
+            provider="heuristic",
+            mode="manual",
+            status="completed",
+            total_samples=3,
+            flagged_samples=1,
+            max_score=0.91,
+            summary_json='{"r18_label": true, "r18_confidence": 0.91, "r18_reason": "visual provider heuristic flagged 1 samples", "risk_flags": ["visual_r18_suspected"], "sample_count": 3, "positive_samples": 1}',
+        )
+    )
+    session.commit()
+
+    candidates = list_series_review_candidates(session, limit=10)
+
+    assert candidates[0]["moderation"]["r18_label"] is True
+    assert candidates[0]["moderation"]["provider"] == "heuristic"
+    assert candidates[0]["moderation"]["sample_count"] == 3
+
+
+def test_list_series_review_candidates_filters_operational_queues(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+
+    def add_candidate(name: str, *, suggestion_payload: dict | None = None, moderation_payload: str | None = None):
+        asset_row = Asset(
+            library_id=library_row.id,
+            original_path=f"/library/{name}/a.jpg",
+            current_path=f"/library/{name}/a.jpg",
+            file_name="a.jpg",
+            file_ext=".jpg",
+            file_size=1,
+            mtime=1.0,
+        )
+        session.add(asset_row)
+        session.flush()
+        candidate = SeriesCandidate(library_id=library_row.id, source_root=f"/library/{name}", title=name, status="pending")
+        session.add(candidate)
+        session.flush()
+        session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id, sort_order=0))
+        if suggestion_payload is not None:
+            session.add(
+                SeriesSuggestion(
+                    candidate_id=candidate.id,
+                    suggested_title=suggestion_payload.get("title", name),
+                    suggested_category=suggestion_payload.get("category", "People"),
+                    confidence=suggestion_payload.get("confidence", 0.9),
+                    risk_flags=suggestion_payload.get("risk_flags", "[]"),
+                    content_tags=suggestion_payload.get("content_tags", "[]"),
+                    r18_label=suggestion_payload.get("r18_label", False),
+                    status=suggestion_payload.get("status", "pending_review"),
+                )
+            )
+            candidate.status = "ai_suggested"
+        if moderation_payload is not None:
+            session.add(
+                SeriesModerationRun(
+                    candidate_id=candidate.id,
+                    provider="heuristic",
+                    mode="workflow",
+                    status="completed",
+                    total_samples=1,
+                    flagged_samples=1,
+                    max_score=0.91,
+                    summary_json=moderation_payload,
+                )
+            )
+        return candidate
+
+    needs_ai = add_candidate("needs-ai")
+    pending_confirm = add_candidate("pending-confirm", suggestion_payload={"confidence": 0.9})
+    low_confidence = add_candidate("low-confidence", suggestion_payload={"confidence": 0.4})
+    target_conflict = add_candidate(
+        "target-conflict",
+        suggestion_payload={"risk_flags": '["target_conflict"]'},
+    )
+    r18 = add_candidate(
+        "r18",
+        suggestion_payload={"r18_label": True, "content_tags": '["R18"]'},
+        moderation_payload='{"r18_label": true, "risk_flags": ["visual_r18_suspected"], "sample_count": 1}',
+    )
+    session.commit()
+
+    assert [item["id"] for item in list_series_review_candidates(session, review_filter="needs_ai")] == [needs_ai.id]
+    assert [item["id"] for item in list_series_review_candidates(session, review_filter="pending_confirm")] == [
+        pending_confirm.id,
+        low_confidence.id,
+        target_conflict.id,
+        r18.id,
+    ]
+    assert [item["id"] for item in list_series_review_candidates(session, review_filter="low_confidence")] == [
+        low_confidence.id
+    ]
+    assert [item["id"] for item in list_series_review_candidates(session, review_filter="target_conflict")] == [
+        target_conflict.id
+    ]
+    assert [item["id"] for item in list_series_review_candidates(session, review_filter="r18")] == [r18.id]
 
 
 def test_list_exact_duplicate_groups_returns_member_assets(tmp_path):

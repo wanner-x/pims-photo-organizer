@@ -18,7 +18,9 @@ from pims_v1.services.review_service import (
     list_series_review_candidates,
     list_similar_groups,
 )
+from pims_v1.services.series_moderation_service import review_series_r18
 from pims_v1.services.series_confirm_service import confirm_series_suggestion
+from pims_v1.services.visual_moderation_service import build_visual_moderation_client
 
 router = APIRouter(prefix="/review", tags=["review"])
 
@@ -77,9 +79,18 @@ def list_similar(
 def list_series_for_review(
     limit: int = 20,
     status: str | None = None,
+    filter: str | None = None,
     session: Session = Depends(get_session),
 ) -> dict[str, list]:
-    return {"items": list_series_review_candidates(session=session, limit=limit, status=status)}
+    return {
+        "items": list_series_review_candidates(
+            session=session,
+            limit=limit,
+            status=status,
+            review_filter=filter,
+            include_rule_plan=True,
+        )
+    }
 
 
 @router.get("/archive/overview")
@@ -148,6 +159,27 @@ def auto_archive_series(
             candidate_id=candidate_id,
             archive_root=archive_root,
             client=client,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/series/{candidate_id}/scan-r18")
+def scan_series_r18(
+    candidate_id: int,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_api_token),
+) -> dict:
+    try:
+        provider = build_visual_moderation_client(settings.r18_provider)
+        return review_series_r18(
+            session=session,
+            candidate_id=candidate_id,
+            provider=provider,
+            mode="manual",
+            sample_limit=settings.r18_sample_limit,
+            high_threshold=settings.r18_high_threshold,
+            review_threshold=settings.r18_review_threshold,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

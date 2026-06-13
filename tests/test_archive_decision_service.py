@@ -14,7 +14,8 @@ from pims_v1.models.archive_decision import (
 )
 from pims_v1.models.asset import Asset
 from pims_v1.models.library import Library
-from pims_v1.models.series import Series, SeriesCandidate, SeriesCandidateAsset
+from pims_v1.models.series_moderation import SeriesModerationRun
+from pims_v1.models.series import Series, SeriesCandidate, SeriesCandidateAsset, SeriesSuggestion
 from pims_v1.services.archive_decision_service import (
     auto_archive_candidate,
     auto_archive_candidates,
@@ -38,6 +39,11 @@ class SequencedAIPlanClient:
         if not self.payloads:
             raise AssertionError("No AI payload left for batch test")
         return json.dumps(self.payloads.pop(0), ensure_ascii=False)
+
+
+class ExplodingAIPlanClient:
+    def chat(self, messages):
+        raise AssertionError("auto archive should reuse the persisted suggestion")
 
 
 def make_session(tmp_path):
@@ -156,6 +162,48 @@ def test_auto_archive_candidate_applies_when_rule_and_ai_agree(tmp_path):
     assert series_row.archive_path == str(archive_root / "雪琪SAMA" / "雪琪SAMA 透明女仆 [43P4V234MB]")
 
 
+def test_auto_archive_candidate_reuses_existing_pending_suggestion(tmp_path):
+    session, candidate_id, archive_root = build_candidate_fixture(
+        tmp_path,
+        source_root="D:/photos/Alice/Alice Set [8P]",
+    )
+    session.add(
+        SeriesSuggestion(
+            candidate_id=candidate_id,
+            suggested_title="Alice Set [8P]",
+            suggested_category="Alice",
+            suggested_archive_path=str(archive_root / "Alice" / "Alice Set [8P]"),
+            plan_summary="cached plan",
+            risk_flags="[]",
+            content_tags="[]",
+            r18_label=False,
+            r18_confidence=0.0,
+            r18_reason="",
+            confidence=0.93,
+            status="pending_review",
+            raw_response='{"cached": true}',
+        )
+    )
+    session.commit()
+
+    result = auto_archive_candidate(
+        session=session,
+        candidate_id=candidate_id,
+        archive_root=str(archive_root),
+        client=ExplodingAIPlanClient(),
+    )
+
+    planning_row = session.query(ArchivePlanningRecord).one()
+    ai_plan = json.loads(planning_row.ai_plan_json)
+
+    assert result["decision_type"] == "auto_apply"
+    assert result["status"] == "confirmed"
+    assert result["moved"] == 1
+    assert ai_plan["plan_summary"] == "cached plan"
+    assert ai_plan["raw_response"] == '{"cached": true}'
+    assert session.query(SeriesSuggestion).one().status == "confirmed"
+
+
 def test_auto_archive_candidate_blocks_r18_suspicion(tmp_path):
     session, candidate_id, archive_root = build_candidate_fixture(
         tmp_path,
@@ -261,6 +309,51 @@ def test_auto_archive_candidates_processes_only_pending_candidates(tmp_path):
     assert first_candidate.status == "confirmed"
     assert session.get(SeriesCandidate, confirmed_candidate.id).status == "confirmed"
     assert session.query(ArchivePlanningRecord).count() == 2
+
+
+def test_auto_archive_candidate_blocks_visual_r18_risk(tmp_path):
+    session, candidate_id, archive_root = build_candidate_fixture(
+        tmp_path,
+        source_root="D:/photos/Alice/Alice Set [8P]",
+    )
+    session.add(
+        SeriesModerationRun(
+            candidate_id=candidate_id,
+            provider="heuristic",
+            mode="workflow",
+            status="completed",
+            total_samples=3,
+            flagged_samples=1,
+            max_score=0.91,
+            summary_json='{"r18_label": true, "r18_confidence": 0.91, "r18_reason": "visual provider heuristic flagged 1 samples", "risk_flags": ["visual_r18_suspected"], "sample_count": 3, "positive_samples": 1}',
+        )
+    )
+    session.commit()
+    client = StaticAIPlanClient(
+        {
+            "title": "Alice Set [8P]",
+            "category": "Alice",
+            "archive_path": "",
+            "plan_summary": "keep person bucket",
+            "risk_flags": [],
+            "tags": [],
+            "r18_label": False,
+            "r18_confidence": 0.0,
+            "r18_reason": "",
+            "confidence": 0.93,
+        }
+    )
+
+    result = auto_archive_candidate(
+        session=session,
+        candidate_id=candidate_id,
+        archive_root=str(archive_root),
+        client=client,
+    )
+
+    assert result["decision_type"] == "manual_review"
+    assert result["status"] == "pending_review"
+    assert result["moved"] == 0
 
 
 def test_rollback_archive_execution_restores_original_asset_path(tmp_path):

@@ -38,6 +38,12 @@ def ensure_database_schema(bind=engine) -> None:
             ON archive_planning_records (decision_type, created_at)
             """
         )
+        connection.exec_driver_sql(
+            """
+            CREATE INDEX IF NOT EXISTS ix_series_moderation_runs_candidate_created_at
+            ON series_moderation_runs (candidate_id, created_at)
+            """
+        )
 
 
 __all__ = ["Base", "SessionLocal", "engine", "ensure_database_schema"]

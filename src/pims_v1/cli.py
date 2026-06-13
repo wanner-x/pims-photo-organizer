@@ -27,6 +27,7 @@ from pims_v1.services.phash_index_service import IMAGE_SUFFIXES, compute_missing
 from pims_v1.services.review_service import list_series_candidates
 from pims_v1.services.safe_workflow_service import run_safe_workflow
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
+from pims_v1.services.series_moderation_service import review_series_r18
 from pims_v1.services.series_index_service import build_series_candidates
 from pims_v1.services.series_confirm_service import confirm_series_candidate
 from pims_v1.services.similar_index_service import build_similar_image_reviews
@@ -34,6 +35,7 @@ from pims_v1.services.status_service import database_status
 from pims_v1.services.task_service import enqueue_task, list_tasks, recover_stale_tasks
 from pims_v1.services.task_worker_service import process_md5_tasks, process_phash_tasks
 from pims_v1.services.thumbnail_service import ensure_thumbnail
+from pims_v1.services.visual_moderation_service import build_visual_moderation_client
 
 
 def build_parser() -> ArgumentParser:
@@ -144,6 +146,10 @@ def build_parser() -> ArgumentParser:
     auto_archive_series.add_argument("--archive-root", required=True)
     auto_archive_series.add_argument("--database-url", default=settings.database_url)
 
+    scan_series_r18 = subparsers.add_parser("scan-series-r18")
+    scan_series_r18.add_argument("candidate_id", type=int)
+    scan_series_r18.add_argument("--database-url", default=settings.database_url)
+
     safe_workflow = subparsers.add_parser("run-safe-workflow")
     safe_workflow.add_argument("--keep-root", default=settings.keep_root)
     safe_workflow.add_argument("--cache-root", default=settings.cache_root)
@@ -151,6 +157,8 @@ def build_parser() -> ArgumentParser:
     safe_workflow.add_argument("--phash-limit", type=int, default=1000)
     safe_workflow.add_argument("--thumbnail-limit", type=int, default=1000)
     safe_workflow.add_argument("--min-series-assets", type=int, default=2)
+    safe_workflow.add_argument("--ai-suggest-limit", type=int, default=settings.ai_suggest_limit)
+    safe_workflow.add_argument("--r18-scan-limit", type=int, default=settings.r18_scan_limit)
     safe_workflow.add_argument("--auto-archive-limit", type=int, default=20)
     safe_workflow.add_argument("--similar-threshold", type=int, default=6)
     safe_workflow.add_argument("--database-url", default=settings.database_url)
@@ -638,6 +646,31 @@ def run_auto_archive_series(candidate_id: int, archive_root: str, database_url: 
     return 0
 
 
+def run_scan_series_r18(candidate_id: int, database_url: str) -> int:
+    session = make_session(database_url)
+    provider = build_visual_moderation_client(settings.r18_provider)
+    try:
+        result = review_series_r18(
+            session=session,
+            candidate_id=candidate_id,
+            provider=provider,
+            mode="manual",
+            sample_limit=settings.r18_sample_limit,
+            high_threshold=settings.r18_high_threshold,
+            review_threshold=settings.r18_review_threshold,
+        )
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"candidate_id={result['candidate_id']}")
+    print(f"provider={result['provider']}")
+    print(f"r18_label={result['r18_label']}")
+    print(f"r18_confidence={result['r18_confidence']}")
+    print(f"sample_count={result['sample_count']}")
+    return 0
+
+
 def run_safe_workflow_command(
     *,
     keep_root: str | None,
@@ -646,6 +679,8 @@ def run_safe_workflow_command(
     phash_limit: int,
     thumbnail_limit: int,
     min_series_assets: int,
+    ai_suggest_limit: int,
+    r18_scan_limit: int,
     auto_archive_limit: int,
     similar_threshold: int,
     database_url: str,
@@ -663,7 +698,8 @@ def run_safe_workflow_command(
 
     session = make_session(database_url)
     archive_client = None
-    if keep_root and auto_archive_limit > 0:
+    moderation_client = None
+    if keep_root and (auto_archive_limit > 0 or ai_suggest_limit > 0):
         archive_client = DeepSeekClient(
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
@@ -671,6 +707,8 @@ def run_safe_workflow_command(
             reasoning_effort=settings.deepseek_reasoning_effort,
             thinking_enabled=settings.deepseek_thinking_enabled,
         )
+    if r18_scan_limit > 0:
+        moderation_client = build_visual_moderation_client(settings.r18_provider)
     try:
         summary = run_safe_workflow(
             session=session,
@@ -680,9 +718,12 @@ def run_safe_workflow_command(
             phash_limit=phash_limit,
             thumbnail_limit=thumbnail_limit,
             min_series_assets=min_series_assets,
+            ai_suggest_limit=ai_suggest_limit,
+            r18_scan_limit=r18_scan_limit,
             auto_archive_limit=auto_archive_limit,
             similar_threshold=similar_threshold,
             archive_client=archive_client,
+            moderation_client=moderation_client,
             progress_callback=print_progress,
         )
     finally:
@@ -804,6 +845,11 @@ def main() -> int:
             archive_root=args.archive_root,
             database_url=args.database_url,
         )
+    if args.command == "scan-series-r18":
+        return run_scan_series_r18(
+            candidate_id=args.candidate_id,
+            database_url=args.database_url,
+        )
     if args.command == "run-safe-workflow":
         return run_safe_workflow_command(
             keep_root=args.keep_root,
@@ -812,6 +858,8 @@ def main() -> int:
             phash_limit=args.phash_limit,
             thumbnail_limit=args.thumbnail_limit,
             min_series_assets=args.min_series_assets,
+            ai_suggest_limit=args.ai_suggest_limit,
+            r18_scan_limit=args.r18_scan_limit,
             auto_archive_limit=args.auto_archive_limit,
             similar_threshold=args.similar_threshold,
             database_url=args.database_url,

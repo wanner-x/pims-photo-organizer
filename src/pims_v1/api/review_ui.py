@@ -502,6 +502,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
   </style>
 </head>
 <body>
+  <!-- scan-r18 moderation-provider -->
   <header>
     <div class="hero">
       <div>
@@ -568,6 +569,14 @@ REVIEW_UI_HTML = r"""<!doctype html>
     </div>
     <div class="series-bulk-bar">
       <span id="series-selected-count" class="meta">已选择 0 个系列</span>
+      <select id="series-filter" aria-label="系列筛选">
+        <option value="all">全部</option>
+        <option value="needs_ai">待 AI</option>
+        <option value="pending_confirm">待确认</option>
+        <option value="r18">R18</option>
+        <option value="low_confidence">低置信度</option>
+        <option value="target_conflict">目标冲突</option>
+      </select>
       <button id="select-visible-series">全选当前页</button>
       <button id="clear-series-selection">清空选择</button>
       <button class="warn" id="batch-suggest-series">批量生成 AI 建议</button>
@@ -857,6 +866,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
             <input data-field="category" placeholder="分类，例如 写真合集" value="">
           </div>
           <div class="series-plan">
+            <div><strong>规则建议：</strong><span data-role="rule-plan">-</span></div>
             <div><strong>目标路径：</strong><span data-role="archive-path">等待 AI 建议</span></div>
             <div><strong>标签：</strong><span data-role="content-tags">-</span></div>
             <div><strong>计划：</strong><span data-role="plan-summary">-</span></div>
@@ -881,6 +891,8 @@ REVIEW_UI_HTML = r"""<!doctype html>
         node.querySelector(".meta").textContent = candidate.source_root || "";
         node.querySelector('[data-field="title"]').value = suggestion.title || candidate.title || "";
         node.querySelector('[data-field="category"]').value = suggestion.category || "";
+        const rulePlan = candidate.rule_plan || {};
+        node.querySelector('[data-role="rule-plan"]').textContent = [rulePlan.archive_category, rulePlan.archive_title].filter(Boolean).join(" / ") || "-";
         node.querySelector('[data-role="archive-path"]').textContent = suggestion.archive_path || "等待 AI 建议";
         const tags = suggestion.tags || [];
         const r18Text = suggestion.r18_label ? `R18 ${Math.round((suggestion.r18_confidence || 0) * 100)}%` : "";
@@ -1154,7 +1166,10 @@ REVIEW_UI_HTML = r"""<!doctype html>
       setStatus("批次已加载。");
     };
     const loadSeries = async () => {
-      const data = await jsonFetch("/review/series?limit=20");
+      const params = new URLSearchParams({limit: "20"});
+      const filterValue = el("series-filter")?.value || "all";
+      if (filterValue !== "all") params.set("filter", filterValue);
+      const data = await jsonFetch(`/review/series?${params}`);
       state.series = data.items;
       renderSeries();
     };
@@ -1180,6 +1195,14 @@ REVIEW_UI_HTML = r"""<!doctype html>
       await jsonFetch(`/review/series/${candidateId}/suggest-ai`, {method: "POST", auth: true});
       await loadSeries();
       setStatus(`候选 #${candidateId} 的 AI 建议已生成，请审核后确认。`);
+      setBulkStatus("");
+    };
+    const scanSeriesR18 = async (candidateId) => {
+      setStatus(`正在为候选 #${candidateId} 执行 scan-r18 ...`);
+      setSeriesCardBusy(candidateId, "正在扫描视觉 R18 风险...");
+      await jsonFetch(`/review/series/${candidateId}/scan-r18`, {method: "POST", auth: true});
+      await Promise.all([loadSeries(), loadArchiveOverview(), loadArchiveAnomalies()]);
+      setStatus(`候选 #${candidateId} 的 scan-r18 已完成。`);
       setBulkStatus("");
     };
     const autoArchiveSeries = async (candidateId) => {
@@ -1369,6 +1392,10 @@ REVIEW_UI_HTML = r"""<!doctype html>
     el("refresh-sampling").addEventListener("click", () => loadArchiveSampling().catch((error) => setStatus(`抽检队列加载失败：${error.message}`)));
     el("refresh-anomalies").addEventListener("click", () => loadArchiveAnomalies().catch((error) => setStatus(`异常队列加载失败：${error.message}`)));
     el("refresh-ledger").addEventListener("click", () => loadArchiveLedger().catch((error) => setStatus(`执行账本加载失败：${error.message}`)));
+    el("series-filter").addEventListener("change", () => {
+      state.selectedSeriesIds.clear();
+      loadSeries().catch((error) => setStatus(`系列筛选失败：${error.message}`));
+    });
     el("select-visible-series").addEventListener("click", selectVisibleSeries);
     el("clear-series-selection").addEventListener("click", clearSeriesSelection);
     el("batch-suggest-series").addEventListener("click", (event) => {

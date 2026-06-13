@@ -9,6 +9,7 @@ from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset, SeriesS
 from pims_v1.services.ai_naming_service import (
     build_series_title_prompt,
     build_series_organization_prompt,
+    suggest_series_organization_candidates,
     suggest_series_organization,
     suggest_series_title,
 )
@@ -62,6 +63,18 @@ class FakeR18OrganizationClient:
             '"r18_label":true,"r18_confidence":0.91,"r18_reason":"目录名已有R18或视觉审核标记",'
             '"confidence":0.88}'
         )
+
+
+class SequencedOrganizationClient:
+    def __init__(self, payloads: list[str]) -> None:
+        self.payloads = list(payloads)
+        self.messages = []
+
+    def chat(self, messages):
+        self.messages.append(messages)
+        if not self.payloads:
+            raise AssertionError("No organization payload left")
+        return self.payloads.pop(0)
 
 
 def make_session(tmp_path):
@@ -201,6 +214,50 @@ def test_suggest_series_organization_creates_review_suggestion(tmp_path):
     assert suggestion.risk_flags == '["目标目录可能已存在"]'
     assert candidate.status == "ai_suggested"
     assert candidate.title == "清晨海边写真"
+
+
+def test_suggest_series_organization_candidates_batches_pending_candidates(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    candidates = []
+    for name in ["set-a", "set-b"]:
+        asset_row = Asset(
+            library_id=library_row.id,
+            original_path=f"/library/{name}/001.jpg",
+            current_path=f"/library/{name}/001.jpg",
+            file_name="001.jpg",
+            file_ext=".jpg",
+            file_size=1,
+            mtime=1.0,
+        )
+        session.add(asset_row)
+        session.flush()
+        candidate = SeriesCandidate(library_id=library_row.id, source_root=f"/library/{name}", status="pending")
+        session.add(candidate)
+        session.flush()
+        session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+        candidates.append(candidate)
+    session.commit()
+    client = SequencedOrganizationClient(
+        [
+            '{"title":"Set A","category":"People","archive_path":"","plan_summary":"plan A","risk_flags":[],"tags":[],"r18_label":false,"r18_confidence":0.0,"r18_reason":"","confidence":0.81}',
+            '{"title":"Set B","category":"People","archive_path":"","plan_summary":"plan B","risk_flags":[],"tags":[],"r18_label":false,"r18_confidence":0.0,"r18_reason":"","confidence":0.82}',
+        ]
+    )
+
+    summary = suggest_series_organization_candidates(
+        session=session,
+        client=client,
+        archive_root="/nas/archive",
+        limit=10,
+    )
+
+    assert summary == {"considered": 2, "processed": 2, "suggested": 2, "skipped": 0, "failed": 0}
+    assert session.query(SeriesSuggestion).count() == 2
+    assert [candidate.status for candidate in candidates] == ["ai_suggested", "ai_suggested"]
+    assert len(client.messages) == 2
 
 
 def test_suggest_series_organization_overrides_generic_ai_for_named_parent_series(tmp_path):

@@ -13,7 +13,7 @@ from pims_v1.models.archive_decision import (
     ArchiveRollbackRecord,
 )
 from pims_v1.models.asset import Asset
-from pims_v1.models.series import Series, SeriesAsset, SeriesCandidate, SeriesCandidateAsset
+from pims_v1.models.series import Series, SeriesAsset, SeriesCandidate, SeriesCandidateAsset, SeriesSuggestion
 from pims_v1.services.ai_naming_service import (
     NamingClient,
     _candidate_sample_file_names,
@@ -21,10 +21,56 @@ from pims_v1.services.ai_naming_service import (
     generate_ai_archive_plan,
 )
 from pims_v1.services.archive_rule_planner import plan_archive_from_source_root
+from pims_v1.services.series_moderation_service import latest_series_moderation_summary
 from pims_v1.services.series_confirm_service import _unique_archive_dir, _unique_file_path
 
 
-def merge_archive_plans(*, rule_plan: dict[str, object], ai_plan: dict[str, object]) -> dict[str, object]:
+def _json_list(value: str | None) -> list[str]:
+    try:
+        parsed = json.loads(value or "[]")
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if str(item).strip()]
+
+
+def _persisted_suggestion_ai_plan(
+    *,
+    session: Session,
+    candidate_id: int,
+) -> dict[str, object] | None:
+    suggestion = (
+        session.query(SeriesSuggestion)
+        .filter(
+            SeriesSuggestion.candidate_id == candidate_id,
+            SeriesSuggestion.status == "pending_review",
+        )
+        .one_or_none()
+    )
+    if suggestion is None or not suggestion.suggested_title or not suggestion.suggested_category:
+        return None
+    return {
+        "title": suggestion.suggested_title,
+        "category": suggestion.suggested_category,
+        "archive_path": suggestion.suggested_archive_path or "",
+        "plan_summary": suggestion.plan_summary or "",
+        "risk_flags": _json_list(suggestion.risk_flags),
+        "tags": _json_list(suggestion.content_tags),
+        "r18_label": bool(suggestion.r18_label),
+        "r18_confidence": float(suggestion.r18_confidence or 0.0),
+        "r18_reason": suggestion.r18_reason or "",
+        "confidence": float(suggestion.confidence or 0.0),
+        "raw_response": suggestion.raw_response or "",
+    }
+
+
+def merge_archive_plans(
+    *,
+    rule_plan: dict[str, object],
+    ai_plan: dict[str, object],
+    moderation_summary: dict[str, object] | None = None,
+) -> dict[str, object]:
     rule_score = float(rule_plan.get("confidence", 0.0))
     ai_score = float(ai_plan.get("confidence", 0.0))
     risk_flags = {
@@ -34,6 +80,13 @@ def merge_archive_plans(*, rule_plan: dict[str, object], ai_plan: dict[str, obje
     }
     if bool(ai_plan.get("r18_label", False)):
         risk_flags.add("r18_suspected")
+    if moderation_summary:
+        if bool(moderation_summary.get("r18_label", False)):
+            risk_flags.add("visual_r18_suspected")
+        for risk_flag in moderation_summary.get("risk_flags", []):
+            text = str(risk_flag).strip()
+            if text:
+                risk_flags.add(text)
 
     same_category = rule_plan.get("category") == ai_plan.get("category")
     same_title = rule_plan.get("title") == ai_plan.get("title")
@@ -57,7 +110,24 @@ def merge_archive_plans(*, rule_plan: dict[str, object], ai_plan: dict[str, obje
         final_title = str(rule_plan.get("title") or ai_plan.get("title") or "Untitled Series")
         risk_flags.add("planner_disagreement")
 
-    risk_score = 1.0 if any(flag.startswith("r18") for flag in risk_flags) else min(1.0, len(risk_flags) * 0.25)
+    risk_score = (
+        1.0
+        if any(flag.startswith("r18") or flag.startswith("visual_r18") for flag in risk_flags)
+        else min(1.0, len(risk_flags) * 0.25)
+    )
+    r18_label = bool(ai_plan.get("r18_label", False)) or bool(moderation_summary and moderation_summary.get("r18_label", False))
+    r18_confidence = max(
+        float(ai_plan.get("r18_confidence", 0.0)),
+        float(moderation_summary.get("r18_confidence", 0.0)) if moderation_summary else 0.0,
+    )
+    r18_reason = str(
+        ai_plan.get("r18_reason")
+        or (moderation_summary.get("r18_reason") if moderation_summary else "")
+        or ""
+    )
+    tags = list(ai_plan.get("tags", []))
+    if r18_label and "R18" not in tags:
+        tags.insert(0, "R18")
     return {
         "decision_type": decision_type,
         "rule_score": rule_score,
@@ -67,8 +137,10 @@ def merge_archive_plans(*, rule_plan: dict[str, object], ai_plan: dict[str, obje
         "title": final_title,
         "plan_summary": str(ai_plan.get("plan_summary", "")),
         "risk_flags": sorted(risk_flags),
-        "tags": list(ai_plan.get("tags", [])),
-        "r18_label": bool(ai_plan.get("r18_label", False)),
+        "tags": tags,
+        "r18_label": r18_label,
+        "r18_confidence": r18_confidence,
+        "r18_reason": r18_reason,
         "decision_reason": (
             f"decision={decision_type}; rule={rule_plan.get('category')}/{rule_plan.get('title')}; "
             f"ai={ai_plan.get('category')}/{ai_plan.get('title')}; risk_flags={sorted(risk_flags)}"
@@ -200,6 +272,16 @@ def _execute_archive_move(
     candidate.status = "confirmed" if failed == 0 else "failed"
     candidate.confidence = max(float(merged["rule_score"]), float(merged["ai_score"]))
     series.status = "confirmed" if failed == 0 else "failed"
+    suggestion = (
+        session.query(SeriesSuggestion)
+        .filter(
+            SeriesSuggestion.candidate_id == candidate.id,
+            SeriesSuggestion.status == "pending_review",
+        )
+        .one_or_none()
+    )
+    if suggestion is not None:
+        suggestion.status = candidate.status
     session.commit()
     return {
         "candidate_id": candidate.id,
@@ -327,14 +409,21 @@ def auto_archive_candidate(
         raise ValueError(f"Series candidate not found: {candidate_id}")
 
     rule_plan = plan_archive_from_source_root(candidate.source_root)
-    ai_plan = generate_ai_archive_plan(
-        source_root=candidate.source_root,
-        file_names=_candidate_sample_file_names(session, candidate_id),
-        archive_root=archive_root,
-        existing_archive_dirs=_existing_archive_dirs(session, archive_root),
-        client=client,
+    ai_plan = _persisted_suggestion_ai_plan(session=session, candidate_id=candidate_id)
+    if ai_plan is None:
+        ai_plan = generate_ai_archive_plan(
+            source_root=candidate.source_root,
+            file_names=_candidate_sample_file_names(session, candidate_id),
+            archive_root=archive_root,
+            existing_archive_dirs=_existing_archive_dirs(session, archive_root),
+            client=client,
+        )
+    moderation_summary = latest_series_moderation_summary(session, candidate_id)
+    merged = merge_archive_plans(
+        rule_plan=rule_plan,
+        ai_plan=ai_plan,
+        moderation_summary=moderation_summary,
     )
-    merged = merge_archive_plans(rule_plan=rule_plan, ai_plan=ai_plan)
     planning_record = _persist_planning_record(
         session=session,
         candidate=candidate,

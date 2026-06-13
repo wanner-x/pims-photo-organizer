@@ -8,6 +8,8 @@ from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.similar import SimilarGroup, SimilarGroupAsset
 from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset, SeriesSuggestion
+from pims_v1.services.archive_rule_planner import plan_archive_from_source_root
+from pims_v1.services.series_moderation_service import latest_series_moderation_summary
 
 
 def list_series_candidates(session: Session, limit: int = 20) -> list[dict]:
@@ -62,13 +64,16 @@ def list_series_review_candidates(
     limit: int = 20,
     status: str | None = None,
     asset_limit: int = 8,
+    review_filter: str | None = None,
+    low_confidence_threshold: float = 0.75,
+    include_rule_plan: bool = False,
 ) -> list[dict]:
     query = session.query(SeriesCandidate).order_by(SeriesCandidate.id)
     if status:
         query = query.filter(SeriesCandidate.status == status)
     else:
         query = query.filter(SeriesCandidate.status.notin_(("confirmed",)))
-    candidates = query.limit(limit).all()
+    candidates = query.limit(limit if review_filter is None else max(limit * 5, limit)).all()
     result = []
     for candidate in candidates:
         asset_rows = (
@@ -83,33 +88,74 @@ def list_series_review_candidates(
             .filter(SeriesSuggestion.candidate_id == candidate.id)
             .one_or_none()
         )
-        result.append(
-            {
-                "id": candidate.id,
-                "title": candidate.title,
-                "source_root": candidate.source_root,
-                "asset_count": len(asset_rows),
-                "status": candidate.status,
-                "suggestion": None
-                if suggestion is None
-                else {
-                    "id": suggestion.id,
-                    "title": suggestion.suggested_title,
-                    "category": suggestion.suggested_category,
-                    "archive_path": suggestion.suggested_archive_path,
-                    "plan_summary": suggestion.plan_summary,
-                    "risk_flags": json.loads(suggestion.risk_flags or "[]"),
-                    "tags": json.loads(suggestion.content_tags or "[]"),
-                    "r18_label": suggestion.r18_label,
-                    "r18_confidence": suggestion.r18_confidence,
-                    "r18_reason": suggestion.r18_reason,
-                    "confidence": suggestion.confidence,
-                    "status": suggestion.status,
-                },
-                "assets": [_series_asset_payload(asset) for asset in asset_rows[:asset_limit]],
-            }
-        )
+        item = {
+            "id": candidate.id,
+            "title": candidate.title,
+            "source_root": candidate.source_root,
+            "asset_count": len(asset_rows),
+            "status": candidate.status,
+            "suggestion": None
+            if suggestion is None
+            else {
+                "id": suggestion.id,
+                "title": suggestion.suggested_title,
+                "category": suggestion.suggested_category,
+                "archive_path": suggestion.suggested_archive_path,
+                "plan_summary": suggestion.plan_summary,
+                "risk_flags": json.loads(suggestion.risk_flags or "[]"),
+                "tags": json.loads(suggestion.content_tags or "[]"),
+                "r18_label": suggestion.r18_label,
+                "r18_confidence": suggestion.r18_confidence,
+                "r18_reason": suggestion.r18_reason,
+                "confidence": suggestion.confidence,
+                "status": suggestion.status,
+            },
+            "assets": [_series_asset_payload(asset) for asset in asset_rows[:asset_limit]],
+        }
+        moderation = latest_series_moderation_summary(session, candidate.id)
+        if moderation is not None:
+            item["moderation"] = moderation
+        if include_rule_plan:
+            item["rule_plan"] = plan_archive_from_source_root(candidate.source_root)
+        if not _matches_series_review_filter(
+            item,
+            review_filter=review_filter,
+            low_confidence_threshold=low_confidence_threshold,
+        ):
+            continue
+        result.append(item)
+        if len(result) >= limit:
+            break
     return result
+
+
+def _matches_series_review_filter(
+    item: dict,
+    *,
+    review_filter: str | None,
+    low_confidence_threshold: float,
+) -> bool:
+    if not review_filter or review_filter == "all":
+        return True
+    suggestion = item.get("suggestion")
+    moderation = item.get("moderation") or {}
+    if review_filter == "needs_ai":
+        return suggestion is None
+    if review_filter == "pending_confirm":
+        return bool(suggestion and suggestion.get("status") == "pending_review")
+    if review_filter == "r18":
+        return bool(
+            suggestion
+            and suggestion.get("r18_label")
+            or moderation.get("r18_label")
+            or "R18" in ((suggestion or {}).get("tags") or [])
+        )
+    if review_filter == "low_confidence":
+        return bool(suggestion and float(suggestion.get("confidence") or 0.0) < low_confidence_threshold)
+    if review_filter == "target_conflict":
+        risk_flags = [str(flag).casefold() for flag in ((suggestion or {}).get("risk_flags") or [])]
+        return any("target_conflict" in flag or "目标" in flag or "exists" in flag for flag in risk_flags)
+    return True
 
 
 def get_archive_review_overview(session: Session) -> dict[str, dict[str, int] | int]:

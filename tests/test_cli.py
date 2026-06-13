@@ -952,6 +952,213 @@ def test_run_safe_workflow_cli_reports_batch_auto_archive_summary(tmp_path, caps
     assert "archive_auto.auto_apply=1" in output
 
 
+def test_run_safe_workflow_cli_reports_ai_suggest_summary(tmp_path, capsys, monkeypatch):
+    from PIL import Image
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "workflow-ai-suggest.db"
+    database_url = f"sqlite:///{db_path}"
+    archive_root = tmp_path / "nas"
+    source_dir = tmp_path / "pc" / "Alice" / "Alice Set [8P]"
+    source_dir.mkdir(parents=True)
+    source_file = source_dir / "001.jpg"
+    Image.new("RGB", (16, 16), color="white").save(source_file)
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path / "pc"))
+    session.add(library_row)
+    session.flush()
+    session.add(
+        Asset(
+            library_id=library_row.id,
+            original_path=str(source_file),
+            current_path=str(source_file),
+            file_name=source_file.name,
+            file_ext=source_file.suffix,
+            file_size=source_file.stat().st_size,
+            mtime=1.0,
+        )
+    )
+    session.commit()
+    session.close()
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def chat(self, messages):
+            return (
+                '{"title":"Alice Set [8P]","category":"Alice",'
+                '"archive_path":"","plan_summary":"keep person bucket","risk_flags":[],"tags":[],'
+                '"r18_label":false,"r18_confidence":0.0,"r18_reason":"","confidence":0.93}'
+            )
+
+    monkeypatch.setattr("pims_v1.cli.DeepSeekClient", FakeClient)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pims",
+            "run-safe-workflow",
+            "--keep-root",
+            str(archive_root),
+            "--cache-root",
+            str(tmp_path / ".cache"),
+            "--md5-limit",
+            "10",
+            "--phash-limit",
+            "10",
+            "--thumbnail-limit",
+            "10",
+            "--min-series-assets",
+            "1",
+            "--ai-suggest-limit",
+            "5",
+            "--auto-archive-limit",
+            "0",
+            "--database-url",
+            database_url,
+        ],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "ai_suggest.processed=1" in output
+    assert "ai_suggest.suggested=1" in output
+
+
+def test_scan_series_r18_cli_reports_flagged_summary(tmp_path, capsys, monkeypatch):
+    from PIL import Image
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "scan-r18.db"
+    database_url = f"sqlite:///{db_path}"
+    source_dir = tmp_path / "pc" / "set"
+    source_dir.mkdir(parents=True)
+    source_file = source_dir / "001.jpg"
+    Image.new("RGB", (16, 16), color=(220, 180, 160)).save(source_file)
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path / "pc"))
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(source_file),
+        current_path=str(source_file),
+        file_name="001.jpg",
+        file_ext=".jpg",
+        file_size=source_file.stat().st_size,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset
+
+    candidate = SeriesCandidate(library_id=library_row.id, source_root=str(source_dir), title="set")
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.commit()
+    candidate_id = candidate.id
+    session.close()
+
+    monkeypatch.setattr(
+        "sys.argv",
+        ["pims", "scan-series-r18", str(candidate_id), "--database-url", database_url],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "r18_label=True" in output
+    assert "provider=heuristic" in output
+
+
+def test_run_safe_workflow_cli_reports_r18_scan_summary(tmp_path, capsys, monkeypatch):
+    from PIL import Image
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "workflow-r18.db"
+    database_url = f"sqlite:///{db_path}"
+    archive_root = tmp_path / "nas"
+    source_dir = tmp_path / "pc" / "Alice" / "Alice Set [8P]"
+    source_dir.mkdir(parents=True)
+    source_file = source_dir / "001.jpg"
+    Image.new("RGB", (16, 16), color=(220, 180, 160)).save(source_file)
+    engine = create_engine(database_url, future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path / "pc"))
+    session.add(library_row)
+    session.flush()
+    session.add(
+        Asset(
+            library_id=library_row.id,
+            original_path=str(source_file),
+            current_path=str(source_file),
+            file_name=source_file.name,
+            file_ext=source_file.suffix,
+            file_size=source_file.stat().st_size,
+            mtime=1.0,
+        )
+    )
+    session.commit()
+    session.close()
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def chat(self, messages):
+            return (
+                '{"title":"Alice Set [8P]","category":"Alice",'
+                '"archive_path":"","plan_summary":"keep person bucket","risk_flags":[],'
+                '"tags":[],"r18_label":false,"r18_confidence":0.0,"r18_reason":"","confidence":0.93}'
+            )
+
+    monkeypatch.setattr("pims_v1.cli.DeepSeekClient", FakeClient)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pims",
+            "run-safe-workflow",
+            "--keep-root",
+            str(archive_root),
+            "--cache-root",
+            str(tmp_path / ".cache"),
+            "--md5-limit",
+            "10",
+            "--phash-limit",
+            "10",
+            "--thumbnail-limit",
+            "10",
+            "--min-series-assets",
+            "1",
+            "--r18-scan-limit",
+            "5",
+            "--auto-archive-limit",
+            "5",
+            "--database-url",
+            database_url,
+        ],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "r18_scan.processed=1" in output
+    assert "r18_scan.flagged=1" in output
+
+
 def test_backup_db_cli_copies_sqlite_database(tmp_path, capsys, monkeypatch):
     database = tmp_path / "pims.db"
     database.write_bytes(b"sqlite-data")

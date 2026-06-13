@@ -61,6 +61,14 @@ Build review data without moving or deleting files:
 pims run-safe-workflow --keep-root "\\192.168.31.10\personal_folder\网络写真集" --md5-limit 1000 --phash-limit 1000 --thumbnail-limit 1000
 ```
 
+Automatically generate AI review suggestions for new series candidates during the same workflow:
+
+```powershell
+pims run-safe-workflow --keep-root "\\192.168.31.10\personal_folder\网络写真集" --ai-suggest-limit 50 --auto-archive-limit 0
+```
+
+The long-running `scripts\run_full_detection.ps1` defaults `-AiSuggestLimit 50`, `-R18ScanLimit 50`, and `-AutoArchiveLimit 20`, so normal background runs create AI suggestions, run visual R18 sampling, and automatically archive low-risk rule/AI agreements without manually clicking each candidate. Set `-AutoArchiveLimit 0` to disable automatic moves.
+
 Review planned batches:
 
 ```powershell

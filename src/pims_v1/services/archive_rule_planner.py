@@ -10,6 +10,7 @@ GENERIC_SOURCE_PARTS = {
     "library",
     "nas",
     "pc",
+    "photos",
     "personal_folder",
     "图册",
     "图册整理",
@@ -18,6 +19,7 @@ GENERIC_SOURCE_PARTS = {
 }
 METADATA_PATTERN = re.compile(r"\[[^\]]*(?:\d+\s*[pPvV]|\d+(?:\.\d+)?\s*(?:KB|MB|GB|TB|K|M|G|T))[^\]]*\]")
 BRACKET_BRAND_PATTERN = re.compile(r"^\[(?P<brand>[^\]]+)\]")
+VOLUME_PATTERN = re.compile(r"\bVOL\.?\s*\d+\b", re.IGNORECASE)
 
 
 def _source_path_parts(source_root: str) -> list[str]:
@@ -40,6 +42,23 @@ def _category_from_parent_or_title(*, parent_name: str, folder_name: str) -> tup
     return folder_name, matched_rules
 
 
+def _metadata_tokens(folder_name: str) -> list[str]:
+    tokens = [match.group(0).strip("[]") for match in METADATA_PATTERN.finditer(folder_name)]
+    for match in VOLUME_PATTERN.finditer(folder_name):
+        token = match.group(0).replace(" ", "")
+        if token not in tokens:
+            tokens.insert(0, token)
+    return tokens
+
+
+def _series_brand(*, category: str, folder_name: str, matched_rules: list[str]) -> str | None:
+    if "title_brand_prefix_match" in matched_rules:
+        return category
+    if folder_name.startswith(category):
+        return category
+    return None
+
+
 def plan_archive_from_source_root(source_root: str) -> dict[str, object]:
     parts = _source_path_parts(source_root)
     folder_name = parts[-1] if parts else source_root
@@ -48,12 +67,16 @@ def plan_archive_from_source_root(source_root: str) -> dict[str, object]:
     metadata = {
         "has_volume": "VOL." in folder_name.upper(),
         "has_metadata_suffix": bool(METADATA_PATTERN.search(folder_name)),
+        "metadata_tokens": _metadata_tokens(folder_name),
+        "series_brand": _series_brand(category=category, folder_name=folder_name, matched_rules=matched_rules),
         "source_parts": parts,
     }
     confidence = 0.95 if "parent_directory_match" in matched_rules else 0.82
     return {
         "category": category,
         "title": folder_name,
+        "archive_category": category,
+        "archive_title": folder_name,
         "archive_path": None,
         "confidence": confidence,
         "matched_rules": matched_rules,
