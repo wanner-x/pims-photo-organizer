@@ -223,6 +223,7 @@ def test_review_ui_page_exists():
     assert "aria-busy" in response.text
     assert "首个错误" in response.text
     assert "目标路径" in response.text
+    assert "content-tags" in response.text
     assert "plan-summary" in response.text
     assert "risk-flags" in response.text
     assert "审核功能导航" in response.text
@@ -652,7 +653,8 @@ def test_review_series_suggest_ai_api_creates_pending_suggestion(tmp_path, monke
         def chat(self, messages):
             return (
                 '{"title":"清晨写真","category":"写真合集","confidence":0.7,'
-                '"plan_summary":"移动到 NAS 归档目录","risk_flags":["人工复核"]}'
+                '"plan_summary":"移动到 NAS 归档目录","risk_flags":["人工复核"],'
+                '"tags":["R18"],"r18_label":true,"r18_confidence":0.8,"r18_reason":"测试标签"}'
             )
 
     def override_get_session():
@@ -673,10 +675,14 @@ def test_review_series_suggest_ai_api_creates_pending_suggestion(tmp_path, monke
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json()["title"] == "清晨写真"
-    assert response.json()["archive_path"].endswith("写真合集\\清晨写真") or response.json()["archive_path"].endswith("写真合集/清晨写真")
+    assert response.json()["title"] == "清晨写真 [R18]"
+    assert response.json()["archive_path"].endswith("写真合集\\清晨写真 [R18]") or response.json()["archive_path"].endswith("写真合集/清晨写真 [R18]")
     assert response.json()["plan_summary"] == "移动到 NAS 归档目录"
     assert response.json()["risk_flags"] == ["人工复核"]
+    assert response.json()["tags"] == ["R18"]
+    assert response.json()["r18_label"] is True
+    assert response.json()["r18_confidence"] == 0.8
+    assert response.json()["r18_reason"] == "测试标签"
     session = session_factory()
     assert session.query(SeriesSuggestion).one().status == "pending_review"
 

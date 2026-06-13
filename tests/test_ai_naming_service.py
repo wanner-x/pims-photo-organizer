@@ -49,6 +49,21 @@ class FakeBadXueqiOrganizationClient:
         )
 
 
+class FakeR18OrganizationClient:
+    def __init__(self) -> None:
+        self.messages = []
+
+    def chat(self, messages):
+        self.messages = messages
+        return (
+            '{"title":"随意改名","category":"写真合集","archive_path":"写真合集/随意改名",'
+            '"plan_summary":"检测到成人内容标签，但不改变归档层级",'
+            '"risk_flags":["需人工复核R18标签"],"tags":["R18","JK黑"],'
+            '"r18_label":true,"r18_confidence":0.91,"r18_reason":"目录名已有R18或视觉审核标记",'
+            '"confidence":0.88}'
+        )
+
+
 def make_session(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
     Base.metadata.create_all(bind=engine)
@@ -172,6 +187,10 @@ def test_suggest_series_organization_creates_review_suggestion(tmp_path):
         "archive_path": "/nas/archive/写真合集/清晨海边写真",
         "plan_summary": "移动到 NAS 写真合集目录并保留原文件名",
         "risk_flags": ["目标目录可能已存在"],
+        "tags": [],
+        "r18_label": False,
+        "r18_confidence": 0.0,
+        "r18_reason": "",
         "confidence": 0.82,
     }
     assert suggestion.status == "pending_review"
@@ -224,3 +243,83 @@ def test_suggest_series_organization_overrides_generic_ai_for_named_parent_serie
     assert suggestion.suggested_title == "雪琪SAMA 透明女仆 [43P4V234MB]"
     assert suggestion.suggested_category == "雪琪SAMA"
     assert suggestion.suggested_archive_path == "/nas/archive/雪琪SAMA/雪琪SAMA 透明女仆 [43P4V234MB]"
+
+
+def test_suggest_series_organization_adds_r18_as_leaf_tag_without_changing_category(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path="/library/紧急企划/【紧急企划】-【VOL.001】-【樱樱樱可】-【JK黑】-【45P1V-858M】/001.jpg",
+        current_path="/library/紧急企划/【紧急企划】-【VOL.001】-【樱樱樱可】-【JK黑】-【45P1V-858M】/001.jpg",
+        file_name="001.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root="/library/紧急企划/【紧急企划】-【VOL.001】-【樱樱樱可】-【JK黑】-【45P1V-858M】",
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.commit()
+    client = FakeR18OrganizationClient()
+
+    result = suggest_series_organization(
+        session=session,
+        candidate_id=candidate.id,
+        client=client,
+        archive_root="/nas/archive",
+    )
+
+    suggestion = session.query(SeriesSuggestion).one()
+    assert result["title"] == "【紧急企划】-【VOL.001】-【樱樱樱可】-【JK黑】-【45P1V-858M】 [R18]"
+    assert result["category"] == "紧急企划"
+    assert result["archive_path"] == "/nas/archive/紧急企划/【紧急企划】-【VOL.001】-【樱樱樱可】-【JK黑】-【45P1V-858M】 [R18]"
+    assert result["tags"] == ["R18", "JK黑"]
+    assert result["r18_label"] is True
+    assert result["r18_confidence"] == 0.91
+    assert suggestion.suggested_category == "紧急企划"
+    assert suggestion.suggested_title.endswith("[R18]")
+
+
+def test_suggest_series_organization_does_not_duplicate_existing_r18_tag(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path="/library/紧急企划/紧急企划 - 见希-JK-R18 [85P1V1.32G]/001.jpg",
+        current_path="/library/紧急企划/紧急企划 - 见希-JK-R18 [85P1V1.32G]/001.jpg",
+        file_name="001.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+    )
+    session.add(asset_row)
+    session.flush()
+    candidate = SeriesCandidate(
+        library_id=library_row.id,
+        source_root="/library/紧急企划/紧急企划 - 见希-JK-R18 [85P1V1.32G]",
+    )
+    session.add(candidate)
+    session.flush()
+    session.add(SeriesCandidateAsset(candidate_id=candidate.id, asset_id=asset_row.id))
+    session.commit()
+
+    result = suggest_series_organization(
+        session=session,
+        candidate_id=candidate.id,
+        client=FakeR18OrganizationClient(),
+        archive_root="/nas/archive",
+    )
+
+    assert result["title"] == "紧急企划 - 见希-JK-R18 [85P1V1.32G]"
+    assert result["archive_path"] == "/nas/archive/紧急企划/紧急企划 - 见希-JK-R18 [85P1V1.32G]"

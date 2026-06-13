@@ -30,6 +30,7 @@ GENERIC_SOURCE_PARTS = {
 }
 GENERIC_AI_SUFFIXES = ("写真", "套图", "合集", "系列")
 METADATA_PATTERN = re.compile(r"\[[^\]]*(?:\d+\s*[pPvV]|\d+(?:\.\d+)?\s*(?:KB|MB|GB|TB|K|M|G|T))[^\]]*\]")
+R18_PATTERN = re.compile(r"(?i)(?:^|[\s\-_【\[])(R18)(?:$|[\s\-_】\]])")
 
 
 def _source_path_parts(source_root: str) -> list[str]:
@@ -61,6 +62,14 @@ def _is_meaningful_source_title(source_title: str) -> bool:
     return bool(re.search(r"[\u4e00-\u9fff]", source_title))
 
 
+def _has_r18_tag(title: str) -> bool:
+    return bool(R18_PATTERN.search(title))
+
+
+def _append_r18_tag(title: str) -> str:
+    return title if _has_r18_tag(title) else f"{title} [R18]"
+
+
 def _reviewed_title_and_category(parsed: dict[str, str | float], policy: dict[str, str | bool | None]) -> tuple[str, str]:
     source_title = str(policy["preferred_title"])
     ai_title = str(parsed["title"])
@@ -74,6 +83,8 @@ def _reviewed_title_and_category(parsed: dict[str, str | float], policy: dict[st
         title = source_title
     else:
         title = ai_title
+    if parsed.get("r18_label"):
+        title = _append_r18_tag(title)
     category = str(preferred_category or parsed["category"] or "未分类")
     return safe_series_path_segment(title)[:255], safe_series_path_segment(category)[:255]
 
@@ -131,9 +142,11 @@ def build_series_organization_prompt(
         "- 保留来源文件夹里的 P/V/大小信息，例如 [43P4V234MB]、[86+1P]；它让审核者一眼看出原始规模。\n"
         "- 不要追加“写真”、“套图”、“合集”、“系列”等来源目录里没有的泛化词。\n"
         "- 不要删除 cosplay 角色名、VOL 编号、机构名、人物名前缀。\n"
+        "- R18 是内容标签，不是归档分类；如果来源名已有 R18 或审核样本判断有明确成人暴露内容，只在 title 末尾保留/追加 [R18]，不要改变 category。\n"
         "请只返回 JSON，不要解释，不要 Markdown。格式必须是："
         '{"title":"简洁中文系列名","category":"一级分类","archive_path":"建议目标路径",'
-        '"plan_summary":"一句话说明移动计划","risk_flags":["风险1"],"confidence":0.0到1.0}。'
+        '"plan_summary":"一句话说明移动计划","risk_flags":["风险1"],"tags":["标签1"],'
+        '"r18_label":false,"r18_confidence":0.0到1.0,"r18_reason":"判断依据","confidence":0.0到1.0}。'
         "category 应优先使用来源上级目录；只有没有明确上级目录时，才使用家庭生活、旅行记录、工作资料、待整理等通用分类。"
         "archive_path 必须位于 NAS 归档根目录下，风险包含重名、来源不清晰、疑似重复、需要人工复核等。"
     )
@@ -152,12 +165,27 @@ def _parse_organization_response(response: str) -> dict[str, str | float]:
     plan_summary = str(payload.get("plan_summary", "")).strip()
     archive_path = str(payload.get("archive_path", "")).strip()
     raw_risk_flags = payload.get("risk_flags", [])
+    raw_tags = payload.get("tags", [])
     if isinstance(raw_risk_flags, str):
         risk_flags = [raw_risk_flags] if raw_risk_flags else []
     elif isinstance(raw_risk_flags, list):
         risk_flags = [str(flag)[:255] for flag in raw_risk_flags if str(flag).strip()]
     else:
         risk_flags = []
+    if isinstance(raw_tags, str):
+        tags = [raw_tags] if raw_tags else []
+    elif isinstance(raw_tags, list):
+        tags = [str(tag).strip()[:80] for tag in raw_tags if str(tag).strip()]
+    else:
+        tags = []
+    r18_label = bool(payload.get("r18_label", False)) or _has_r18_tag(title)
+    try:
+        r18_confidence = float(payload.get("r18_confidence", 1.0 if r18_label else 0.0))
+    except (TypeError, ValueError):
+        r18_confidence = 0.0
+    r18_reason = str(payload.get("r18_reason", "")).strip()
+    if r18_label and "R18" not in tags:
+        tags.insert(0, "R18")
     if not title:
         raise ValueError("AI series title suggestion was empty")
     return {
@@ -166,6 +194,10 @@ def _parse_organization_response(response: str) -> dict[str, str | float]:
         "archive_path": archive_path[:2048],
         "plan_summary": plan_summary[:1024],
         "risk_flags": risk_flags[:10],
+        "tags": tags[:20],
+        "r18_label": r18_label,
+        "r18_confidence": max(0.0, min(r18_confidence, 1.0)),
+        "r18_reason": r18_reason[:1024],
         "confidence": max(0.0, min(confidence, 1.0)),
     }
 
@@ -261,6 +293,10 @@ def suggest_series_organization(
     )
     suggestion.plan_summary = str(parsed.get("plan_summary", ""))
     suggestion.risk_flags = json.dumps(parsed.get("risk_flags", []), ensure_ascii=False)
+    suggestion.content_tags = json.dumps(parsed.get("tags", []), ensure_ascii=False)
+    suggestion.r18_label = bool(parsed.get("r18_label", False))
+    suggestion.r18_confidence = float(parsed.get("r18_confidence", 0.0))
+    suggestion.r18_reason = str(parsed.get("r18_reason", ""))
     suggestion.confidence = float(parsed["confidence"])
     suggestion.status = "pending_review"
     suggestion.raw_response = raw_response
@@ -276,5 +312,9 @@ def suggest_series_organization(
         "archive_path": suggestion.suggested_archive_path,
         "plan_summary": suggestion.plan_summary,
         "risk_flags": json.loads(suggestion.risk_flags or "[]"),
+        "tags": json.loads(suggestion.content_tags or "[]"),
+        "r18_label": suggestion.r18_label,
+        "r18_confidence": suggestion.r18_confidence,
+        "r18_reason": suggestion.r18_reason,
         "confidence": suggestion.confidence,
     }

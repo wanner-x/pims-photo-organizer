@@ -19,6 +19,10 @@ def ensure_database_schema(bind=engine) -> None:
             "suggested_archive_path": "VARCHAR(2048)",
             "plan_summary": "TEXT",
             "risk_flags": "TEXT",
+            "content_tags": "TEXT",
+            "r18_label": "BOOLEAN DEFAULT 0 NOT NULL",
+            "r18_confidence": "FLOAT DEFAULT 0.0 NOT NULL",
+            "r18_reason": "TEXT",
         }.items():
             if column_name not in existing_series_suggestion_columns:
                 connection.exec_driver_sql(f"ALTER TABLE series_suggestions ADD COLUMN {column_name} {column_type}")

@@ -775,6 +775,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
           </div>
           <div class="series-plan">
             <div><strong>目标路径：</strong><span data-role="archive-path">等待 AI 建议</span></div>
+            <div><strong>标签：</strong><span data-role="content-tags">-</span></div>
             <div><strong>计划：</strong><span data-role="plan-summary">-</span></div>
             <div><strong>风险：</strong><span data-role="risk-flags">-</span></div>
           </div>
@@ -797,8 +798,11 @@ REVIEW_UI_HTML = r"""<!doctype html>
         node.querySelector('[data-field="title"]').value = suggestion.title || candidate.title || "";
         node.querySelector('[data-field="category"]').value = suggestion.category || "";
         node.querySelector('[data-role="archive-path"]').textContent = suggestion.archive_path || "等待 AI 建议";
+        const tags = suggestion.tags || [];
+        const r18Text = suggestion.r18_label ? `R18 ${Math.round((suggestion.r18_confidence || 0) * 100)}%` : "";
+        node.querySelector('[data-role="content-tags"]').textContent = [r18Text, ...tags.filter((tag) => tag !== "R18")].filter(Boolean).join("；") || "未标记";
         node.querySelector('[data-role="plan-summary"]').textContent = suggestion.plan_summary || "-";
-        node.querySelector('[data-role="risk-flags"]').textContent = (suggestion.risk_flags || []).join("；") || "未标记风险";
+        node.querySelector('[data-role="risk-flags"]').textContent = [suggestion.r18_reason, ...(suggestion.risk_flags || [])].filter(Boolean).join("；") || "未标记风险";
         const assetBox = node.querySelector(".series-assets");
         const previews = (candidate.assets || []).slice(0, 8).map((asset) => {
           const img = document.createElement("img");
