@@ -58,3 +58,21 @@ def test_build_similar_image_reviews_creates_group_for_close_phashes(tmp_path):
     assert [member.asset_id for member in members] == [first.id, second.id]
     assert review_item.item_type == "similar_image"
     assert review_item.subject_id == group.id
+
+
+def test_build_similar_image_reviews_respects_limit(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    first = add_asset(session, library_row.id, "/library/a.jpg", "0000")
+    second = add_asset(session, library_row.id, "/library/b.jpg", "0001")
+    add_asset(session, library_row.id, "/library/c.jpg", "00f0")
+    add_asset(session, library_row.id, "/library/d.jpg", "00f1")
+    session.commit()
+
+    summary = build_similar_image_reviews(session=session, threshold=1, limit=2)
+
+    members = session.query(SimilarGroupAsset).order_by(SimilarGroupAsset.asset_id).all()
+    assert summary == {"groups": 1, "review_items": 1}
+    assert [member.asset_id for member in members] == [first.id, second.id]

@@ -85,6 +85,7 @@ def test_run_safe_workflow_builds_candidates_and_duplicate_plan(tmp_path):
         phash_limit=10,
         thumbnail_limit=10,
         min_series_assets=1,
+        series_limit=100,
     )
 
     assert summary["md5"]["processed"] == 2
@@ -218,6 +219,88 @@ def test_run_safe_workflow_only_enqueues_images_for_phash(tmp_path):
     assert summary["phash"]["skipped_non_image"] == 0
 
 
+def test_run_safe_workflow_skips_similar_reviews_by_default(tmp_path, monkeypatch):
+    from PIL import Image
+
+    def fail_if_called(**kwargs):
+        raise AssertionError("similar review building must be opt-in for long-running workflow")
+
+    monkeypatch.setattr("pims_v1.services.safe_workflow_service.build_similar_image_reviews", fail_if_called)
+    session = make_session(tmp_path)
+    root = tmp_path / "library"
+    root.mkdir()
+    image_file = root / "a.jpg"
+    Image.new("RGB", (16, 16), color="white").save(image_file)
+    library_row = Library(name="Photos", kind="local", root_path=str(root))
+    session.add(library_row)
+    session.flush()
+    session.add(
+        Asset(
+            library_id=library_row.id,
+            original_path=str(image_file),
+            current_path=str(image_file),
+            file_name=image_file.name,
+            file_ext=image_file.suffix,
+            file_size=image_file.stat().st_size,
+            mtime=1.0,
+        )
+    )
+    session.commit()
+
+    summary = run_safe_workflow(
+        session=session,
+        keep_root=None,
+        cache_root=tmp_path / ".cache",
+        md5_limit=1,
+        phash_limit=1,
+        thumbnail_limit=1,
+        min_series_assets=1,
+    )
+
+    assert summary["similar"] == {"groups": 0, "review_items": 0, "skipped": 1}
+
+
+def test_run_safe_workflow_skips_series_rebuild_by_default(tmp_path, monkeypatch):
+    from PIL import Image
+
+    def fail_if_called(**kwargs):
+        raise AssertionError("series rebuild must be opt-in for long-running workflow")
+
+    monkeypatch.setattr("pims_v1.services.safe_workflow_service.build_series_candidates", fail_if_called)
+    session = make_session(tmp_path)
+    root = tmp_path / "library"
+    root.mkdir()
+    image_file = root / "a.jpg"
+    Image.new("RGB", (16, 16), color="white").save(image_file)
+    library_row = Library(name="Photos", kind="local", root_path=str(root))
+    session.add(library_row)
+    session.flush()
+    session.add(
+        Asset(
+            library_id=library_row.id,
+            original_path=str(image_file),
+            current_path=str(image_file),
+            file_name=image_file.name,
+            file_ext=image_file.suffix,
+            file_size=image_file.stat().st_size,
+            mtime=1.0,
+        )
+    )
+    session.commit()
+
+    summary = run_safe_workflow(
+        session=session,
+        keep_root=None,
+        cache_root=tmp_path / ".cache",
+        md5_limit=1,
+        phash_limit=1,
+        thumbnail_limit=1,
+        min_series_assets=1,
+    )
+
+    assert summary["series"] == {"candidates": 0, "review_items": 0, "skipped": 1}
+
+
 def test_run_safe_workflow_executes_batch_auto_archive_when_enabled(tmp_path):
     from PIL import Image
 
@@ -252,6 +335,7 @@ def test_run_safe_workflow_executes_batch_auto_archive_when_enabled(tmp_path):
         phash_limit=10,
         thumbnail_limit=10,
         min_series_assets=1,
+        series_limit=100,
         auto_archive_limit=5,
         archive_client=StaticAIPlanClient(
             {
@@ -310,6 +394,7 @@ def test_run_safe_workflow_generates_ai_suggestions_when_enabled(tmp_path):
         phash_limit=10,
         thumbnail_limit=10,
         min_series_assets=1,
+        series_limit=100,
         ai_suggest_limit=5,
         auto_archive_limit=0,
         archive_client=StaticAIPlanClient(
@@ -382,6 +467,7 @@ def test_run_safe_workflow_reuses_ai_suggestion_for_auto_archive(tmp_path):
         phash_limit=10,
         thumbnail_limit=10,
         min_series_assets=1,
+        series_limit=100,
         ai_suggest_limit=5,
         auto_archive_limit=5,
         archive_client=client,
@@ -429,6 +515,7 @@ def test_run_safe_workflow_runs_r18_scan_before_auto_archive(tmp_path):
         phash_limit=10,
         thumbnail_limit=10,
         min_series_assets=1,
+        series_limit=100,
         r18_scan_limit=5,
         auto_archive_limit=5,
         archive_client=StaticAIPlanClient(

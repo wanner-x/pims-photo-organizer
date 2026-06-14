@@ -7,6 +7,8 @@ param(
     [int]$AiSuggestLimit = 50,
     [int]$R18ScanLimit = 50,
     [int]$AutoArchiveLimit = 20,
+    [int]$SimilarLimit = 0,
+    [int]$SeriesLimit = 0,
     [int]$BackupEveryRounds = 5,
     [int]$SleepSeconds = 5,
     [switch]$ExecuteConfirmedBatches
@@ -94,9 +96,9 @@ function Invoke-ConfirmedBatches {
 
 Write-RunLog "Full detection started. Log: $LogPath"
 if ([string]::IsNullOrWhiteSpace($KeepRoot)) {
-    Write-RunLog "KeepRoot=.env Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit AiSuggestLimit=$AiSuggestLimit R18ScanLimit=$R18ScanLimit AutoArchiveLimit=$AutoArchiveLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
+    Write-RunLog "KeepRoot=.env Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit AiSuggestLimit=$AiSuggestLimit R18ScanLimit=$R18ScanLimit AutoArchiveLimit=$AutoArchiveLimit SimilarLimit=$SimilarLimit SeriesLimit=$SeriesLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
 } else {
-    Write-RunLog "KeepRoot=$KeepRoot Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit AiSuggestLimit=$AiSuggestLimit R18ScanLimit=$R18ScanLimit AutoArchiveLimit=$AutoArchiveLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
+    Write-RunLog "KeepRoot=$KeepRoot Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit AiSuggestLimit=$AiSuggestLimit R18ScanLimit=$R18ScanLimit AutoArchiveLimit=$AutoArchiveLimit SimilarLimit=$SimilarLimit SeriesLimit=$SeriesLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
 }
 
 $round = 0
@@ -120,6 +122,8 @@ while ($true) {
         "--ai-suggest-limit", "$AiSuggestLimit",
         "--r18-scan-limit", "$R18ScanLimit",
         "--auto-archive-limit", "$AutoArchiveLimit",
+        "--similar-limit", "$SimilarLimit",
+        "--series-limit", "$SeriesLimit",
         "--min-series-assets", "2"
     )
     if (-not [string]::IsNullOrWhiteSpace($KeepRoot)) {

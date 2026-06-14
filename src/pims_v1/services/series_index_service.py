@@ -8,9 +8,12 @@ from pims_v1.models.review import ReviewItem
 from pims_v1.models.series import SeriesCandidate, SeriesCandidateAsset
 
 
-def build_series_candidates(*, session: Session, min_assets: int = 2) -> dict[str, int]:
+def build_series_candidates(*, session: Session, min_assets: int = 2, limit: int | None = None) -> dict[str, int]:
     grouped: dict[tuple[int, str], list[Asset]] = defaultdict(list)
-    assets = session.query(Asset).order_by(Asset.library_id, Asset.original_path).all()
+    query = session.query(Asset).order_by(Asset.library_id, Asset.original_path)
+    if limit is not None:
+        query = query.limit(limit)
+    assets = query.all()
     for asset in assets:
         source_root = PurePath(asset.original_path).parent.as_posix()
         grouped[(asset.library_id, source_root)].append(asset)

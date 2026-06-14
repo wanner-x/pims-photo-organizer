@@ -30,13 +30,15 @@ def _clusters(assets: list[Asset], threshold: int) -> list[list[Asset]]:
     return clusters
 
 
-def build_similar_image_reviews(*, session: Session, threshold: int = 6) -> dict[str, int]:
-    assets = (
+def build_similar_image_reviews(*, session: Session, threshold: int = 6, limit: int | None = None) -> dict[str, int]:
+    query = (
         session.query(Asset)
         .filter(Asset.hash_phash.is_not(None))
         .order_by(Asset.id)
-        .all()
     )
+    if limit is not None:
+        query = query.limit(limit)
+    assets = query.all()
     clusters = _clusters(assets, threshold=threshold)
     review_items_created = 0
 

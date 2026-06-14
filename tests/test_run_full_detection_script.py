@@ -10,3 +10,7 @@ def test_full_detection_script_enables_ai_suggestions_by_default():
     assert '"--r18-scan-limit", "$R18ScanLimit"' in script
     assert "[int]$AutoArchiveLimit = 20" in script
     assert '"--auto-archive-limit", "$AutoArchiveLimit"' in script
+    assert "[int]$SimilarLimit = 0" in script
+    assert '"--similar-limit", "$SimilarLimit"' in script
+    assert "[int]$SeriesLimit = 0" in script
+    assert '"--series-limit", "$SeriesLimit"' in script

@@ -157,9 +157,11 @@ def build_parser() -> ArgumentParser:
     safe_workflow.add_argument("--phash-limit", type=int, default=1000)
     safe_workflow.add_argument("--thumbnail-limit", type=int, default=1000)
     safe_workflow.add_argument("--min-series-assets", type=int, default=2)
+    safe_workflow.add_argument("--series-limit", type=int, default=0)
     safe_workflow.add_argument("--ai-suggest-limit", type=int, default=settings.ai_suggest_limit)
     safe_workflow.add_argument("--r18-scan-limit", type=int, default=settings.r18_scan_limit)
     safe_workflow.add_argument("--auto-archive-limit", type=int, default=20)
+    safe_workflow.add_argument("--similar-limit", type=int, default=0)
     safe_workflow.add_argument("--similar-threshold", type=int, default=6)
     safe_workflow.add_argument("--database-url", default=settings.database_url)
 
@@ -679,9 +681,11 @@ def run_safe_workflow_command(
     phash_limit: int,
     thumbnail_limit: int,
     min_series_assets: int,
+    series_limit: int,
     ai_suggest_limit: int,
     r18_scan_limit: int,
     auto_archive_limit: int,
+    similar_limit: int,
     similar_threshold: int,
     database_url: str,
 ) -> int:
@@ -718,9 +722,11 @@ def run_safe_workflow_command(
             phash_limit=phash_limit,
             thumbnail_limit=thumbnail_limit,
             min_series_assets=min_series_assets,
+            series_limit=series_limit,
             ai_suggest_limit=ai_suggest_limit,
             r18_scan_limit=r18_scan_limit,
             auto_archive_limit=auto_archive_limit,
+            similar_limit=similar_limit,
             similar_threshold=similar_threshold,
             archive_client=archive_client,
             moderation_client=moderation_client,
@@ -858,9 +864,11 @@ def main() -> int:
             phash_limit=args.phash_limit,
             thumbnail_limit=args.thumbnail_limit,
             min_series_assets=args.min_series_assets,
+            series_limit=args.series_limit,
             ai_suggest_limit=args.ai_suggest_limit,
             r18_scan_limit=args.r18_scan_limit,
             auto_archive_limit=args.auto_archive_limit,
+            similar_limit=args.similar_limit,
             similar_threshold=args.similar_threshold,
             database_url=args.database_url,
         )

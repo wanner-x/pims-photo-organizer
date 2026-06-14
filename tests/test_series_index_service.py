@@ -72,3 +72,21 @@ def test_build_series_candidates_is_idempotent(tmp_path):
     assert session.query(SeriesCandidate).count() == 1
     assert session.query(SeriesCandidateAsset).count() == 2
     assert session.query(ReviewItem).count() == 1
+
+
+def test_build_series_candidates_respects_limit(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Library", kind="local", root_path="/library")
+    session.add(library_row)
+    session.flush()
+    add_asset(session, library_row.id, "/library/set1/a.jpg")
+    add_asset(session, library_row.id, "/library/set1/b.jpg")
+    add_asset(session, library_row.id, "/library/set2/c.jpg")
+    add_asset(session, library_row.id, "/library/set2/d.jpg")
+    session.commit()
+
+    summary = build_series_candidates(session=session, min_assets=2, limit=2)
+
+    candidate = session.query(SeriesCandidate).one()
+    assert summary == {"candidates": 1, "review_items": 1}
+    assert candidate.source_root == "/library/set1"

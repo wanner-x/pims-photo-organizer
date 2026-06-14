@@ -60,6 +60,22 @@ def _empty_r18_scan_summary() -> dict[str, int]:
     }
 
 
+def _empty_similar_summary() -> dict[str, int]:
+    return {
+        "groups": 0,
+        "review_items": 0,
+        "skipped": 1,
+    }
+
+
+def _empty_series_summary() -> dict[str, int]:
+    return {
+        "candidates": 0,
+        "review_items": 0,
+        "skipped": 1,
+    }
+
+
 def _active_task_subject_ids(session: Session, task_type: str, asset_ids: list[int]) -> set[int]:
     if not asset_ids:
         return set()
@@ -159,9 +175,11 @@ def run_safe_workflow(
     phash_limit: int = 1000,
     thumbnail_limit: int = 1000,
     min_series_assets: int = 2,
+    series_limit: int = 0,
     ai_suggest_limit: int = 0,
     r18_scan_limit: int = 0,
     auto_archive_limit: int = 20,
+    similar_limit: int = 0,
     similar_threshold: int = 6,
     stale_after_seconds: int = 300,
     archive_client: NamingClient | None = None,
@@ -182,8 +200,20 @@ def run_safe_workflow(
         limit=phash_limit,
         progress_callback=progress_callback,
     )
-    similar = build_similar_image_reviews(session=session, threshold=similar_threshold)
-    series = build_series_candidates(session=session, min_assets=min_series_assets)
+    similar = _empty_similar_summary()
+    if similar_limit > 0:
+        similar = build_similar_image_reviews(
+            session=session,
+            threshold=similar_threshold,
+            limit=similar_limit,
+        )
+    series = _empty_series_summary()
+    if series_limit > 0:
+        series = build_series_candidates(
+            session=session,
+            min_assets=min_series_assets,
+            limit=series_limit,
+        )
     thumbnails = _build_thumbnails(session=session, cache_root=cache_root, limit=thumbnail_limit)
     ai_suggest = _empty_ai_suggest_summary()
     if keep_root and ai_suggest_limit > 0 and archive_client is not None:
