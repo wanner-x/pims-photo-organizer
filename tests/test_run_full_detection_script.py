@@ -14,3 +14,8 @@ def test_full_detection_script_enables_ai_suggestions_by_default():
     assert '"--similar-limit", "$SimilarLimit"' in script
     assert "[int]$SeriesLimit = 0" in script
     assert '"--series-limit", "$SeriesLimit"' in script
+    assert "try {" in script
+    assert "catch {" in script
+    assert "Round $round failed" in script
+    assert "===== Round $round completed =====" in script
+    assert "Full detection stopped. exit_code=$exitCode" in script

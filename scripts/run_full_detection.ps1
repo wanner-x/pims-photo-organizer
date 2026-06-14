@@ -102,45 +102,60 @@ if ([string]::IsNullOrWhiteSpace($KeepRoot)) {
 }
 
 $round = 0
-while ($true) {
-    $round += 1
-    Write-RunLog "===== Round $round started ====="
+$exitCode = 0
+try {
+    while ($true) {
+        $round += 1
+        Write-RunLog "===== Round $round started ====="
+        try {
+            if ($ExecuteConfirmedBatches) {
+                Invoke-ConfirmedBatches
+            }
 
-    if ($ExecuteConfirmedBatches) {
-        Invoke-ConfirmedBatches
+            if ($round -eq 1 -or (($round - 1) % $BackupEveryRounds) -eq 0) {
+                Invoke-Pims @("backup-db", "--label", "full-detection-round-$round-$RunStamp")
+            }
+
+            $workflowArgs = @(
+                "run-safe-workflow",
+                "--md5-limit", "$Md5Limit",
+                "--phash-limit", "$PhashLimit",
+                "--thumbnail-limit", "$ThumbnailLimit",
+                "--ai-suggest-limit", "$AiSuggestLimit",
+                "--r18-scan-limit", "$R18ScanLimit",
+                "--auto-archive-limit", "$AutoArchiveLimit",
+                "--similar-limit", "$SimilarLimit",
+                "--series-limit", "$SeriesLimit",
+                "--min-series-assets", "2"
+            )
+            if (-not [string]::IsNullOrWhiteSpace($KeepRoot)) {
+                $workflowArgs = @("run-safe-workflow", "--keep-root", $KeepRoot) + $workflowArgs[1..($workflowArgs.Count - 1)]
+            }
+            Invoke-Pims $workflowArgs
+
+            $progress = Get-ProgressSummary
+            $assets = $progress.assets
+            Write-RunLog "Progress: assets=$($assets.total) md5=$($assets.md5_done)/$($assets.total) phash=$($assets.phash_done)/$($assets.phash_total) pending_reviews=$($progress.reviews.pending)"
+            Write-RunLog "===== Round $round completed ====="
+
+            $md5Complete = [int]$assets.total -eq 0 -or [int]$assets.md5_done -ge [int]$assets.total
+            $phashComplete = [int]$assets.phash_total -eq 0 -or [int]$assets.phash_done -ge [int]$assets.phash_total
+            if ($md5Complete -and $phashComplete) {
+                Write-RunLog "Full detection complete."
+                break
+            }
+        } catch {
+            Write-RunLog "ERROR Round $round failed: $($_.Exception.Message)"
+            Write-RunLog "ERROR $($_ | Out-String)"
+        }
+
+        Start-Sleep -Seconds $SleepSeconds
     }
-
-    if ($round -eq 1 -or (($round - 1) % $BackupEveryRounds) -eq 0) {
-        Invoke-Pims @("backup-db", "--label", "full-detection-round-$round-$RunStamp")
-    }
-
-    $workflowArgs = @(
-        "run-safe-workflow",
-        "--md5-limit", "$Md5Limit",
-        "--phash-limit", "$PhashLimit",
-        "--thumbnail-limit", "$ThumbnailLimit",
-        "--ai-suggest-limit", "$AiSuggestLimit",
-        "--r18-scan-limit", "$R18ScanLimit",
-        "--auto-archive-limit", "$AutoArchiveLimit",
-        "--similar-limit", "$SimilarLimit",
-        "--series-limit", "$SeriesLimit",
-        "--min-series-assets", "2"
-    )
-    if (-not [string]::IsNullOrWhiteSpace($KeepRoot)) {
-        $workflowArgs = @("run-safe-workflow", "--keep-root", $KeepRoot) + $workflowArgs[1..($workflowArgs.Count - 1)]
-    }
-    Invoke-Pims $workflowArgs
-
-    $progress = Get-ProgressSummary
-    $assets = $progress.assets
-    Write-RunLog "Progress: assets=$($assets.total) md5=$($assets.md5_done)/$($assets.total) phash=$($assets.phash_done)/$($assets.phash_total) pending_reviews=$($progress.reviews.pending)"
-
-    $md5Complete = [int]$assets.total -eq 0 -or [int]$assets.md5_done -ge [int]$assets.total
-    $phashComplete = [int]$assets.phash_total -eq 0 -or [int]$assets.phash_done -ge [int]$assets.phash_total
-    if ($md5Complete -and $phashComplete) {
-        Write-RunLog "Full detection complete."
-        break
-    }
-
-    Start-Sleep -Seconds $SleepSeconds
+} catch {
+    $exitCode = 1
+    Write-RunLog "FATAL Full detection failed: $($_.Exception.Message)"
+    Write-RunLog "FATAL $($_ | Out-String)"
+} finally {
+    Write-RunLog "Full detection stopped. exit_code=$exitCode"
 }
+exit $exitCode
