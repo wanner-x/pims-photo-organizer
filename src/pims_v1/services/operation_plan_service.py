@@ -116,13 +116,11 @@ def confirm_operation_batch(session: Session, batch_id: int) -> dict[str, int | 
     operations = (
         session.query(Operation)
         .filter(Operation.batch_id == batch_id, Operation.status == "planned")
-        .all()
+        .update({Operation.status: "confirmed"}, synchronize_session=False)
     )
-    for operation in operations:
-        operation.status = "confirmed"
     batch.status = "confirmed"
     session.commit()
-    return {"batch_id": batch.id, "operations": len(operations), "status": batch.status}
+    return {"batch_id": batch.id, "operations": operations, "status": batch.status}
 
 
 def list_operation_batches(session: Session) -> list[dict[str, int | str | None]]:

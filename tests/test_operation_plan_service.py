@@ -1,4 +1,5 @@
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Query
 from sqlalchemy.orm import sessionmaker
 
 from pims_v1.db import Base
@@ -135,6 +136,38 @@ def test_confirm_operation_batch_marks_planned_operations_confirmed(tmp_path):
     assert result == {"batch_id": batch.id, "operations": 1, "status": "confirmed"}
     assert batch.status == "confirmed"
     assert operation_row.status == "confirmed"
+
+
+def test_confirm_operation_batch_uses_bulk_update_without_loading_operations(tmp_path, monkeypatch):
+    session = make_session(tmp_path)
+    batch = OperationBatch(batch_type="duplicate_quarantine", status="planned")
+    session.add(batch)
+    session.flush()
+    session.add_all(
+        [
+            Operation(
+                batch_id=batch.id,
+                operation_type="quarantine_duplicate",
+                from_path=f"D:\\photos\\{index}.jpg",
+                status="planned",
+            )
+            for index in range(3)
+        ]
+    )
+    session.commit()
+    original_all = Query.all
+
+    def fail_if_operations_are_materialized(query):
+        if query.column_descriptions[0].get("entity") is Operation:
+            raise AssertionError("confirm_operation_batch must bulk-update operations")
+        return original_all(query)
+
+    monkeypatch.setattr(Query, "all", fail_if_operations_are_materialized)
+
+    result = confirm_operation_batch(session=session, batch_id=batch.id)
+
+    assert result == {"batch_id": batch.id, "operations": 3, "status": "confirmed"}
+    assert session.query(Operation).filter(Operation.status == "confirmed").count() == 3
 
 
 def test_exclude_operation_marks_planned_operation_excluded(tmp_path):

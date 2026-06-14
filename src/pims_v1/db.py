@@ -1,12 +1,25 @@
 from sqlalchemy import create_engine
+from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker
 
 from pims_v1.config import settings
 from pims_v1.models.base import Base
 
 
-engine = create_engine(settings.database_url, future=True)
+_sqlite_connect_args = {"timeout": 30} if settings.database_url.startswith("sqlite") else {}
+engine = create_engine(settings.database_url, connect_args=_sqlite_connect_args, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+
+
+@event.listens_for(engine, "connect")
+def _configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
+    if not settings.database_url.startswith("sqlite"):
+        return
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA busy_timeout=30000")
+    finally:
+        cursor.close()
 
 
 def ensure_database_schema(bind=engine) -> None:
