@@ -208,6 +208,22 @@ def test_review_ui_page_exists():
 
     assert response.status_code == 200
     assert "PIMS Review" in response.text
+
+
+def test_review_ui_batch_confirm_button_requires_actionable_planned_batch():
+    client = TestClient(app)
+
+    response = client.get("/review-ui")
+
+    assert response.status_code == 200
+    assert "const selectedBatch = () => state.batches.find((batch) => batch.id === state.batchId);" in response.text
+    assert 'batch.status === "planned" && (batch.operation_count || 0) > 0' in response.text
+    assert "button.disabled = !canConfirm;" in response.text
+    assert "const batchConfirmBlocker = (batch) => {" in response.text
+    assert "explainSelectedBatchConfirmState();" in response.text
+    assert "请先选择一个包含操作的 planned 批次。" in response.text
+    assert "setStatus(blocker);" in response.text
+    assert '确认批次失败：${error.message}' in response.text
     assert "待确认隔离批次" in response.text
     assert "整理进度" in response.text
     assert "已存在位置" in response.text

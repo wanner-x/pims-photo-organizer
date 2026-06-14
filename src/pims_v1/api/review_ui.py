@@ -818,10 +818,29 @@ REVIEW_UI_HTML = r"""<!doctype html>
       if (payload.log) renderLog(payload.log);
       if (!state.batchId) loadBatches().catch(() => {});
     };
+    const selectedBatch = () => state.batches.find((batch) => batch.id === state.batchId);
+    const batchConfirmBlocker = (batch) => {
+      if (!batch) return "请先选择一个包含操作的 planned 批次。";
+      if (batch.status !== "planned") return `批次 #${batch.id} 当前状态是 ${batch.status}，不能确认。`;
+      if ((batch.operation_count || 0) <= 0) return `批次 #${batch.id} 没有可确认操作。`;
+      return "";
+    };
+    const updateBatchActionState = () => {
+      const batch = selectedBatch();
+      const canConfirm = Boolean(batch && batch.status === "planned" && (batch.operation_count || 0) > 0);
+      const button = el("confirm-batch");
+      button.disabled = !canConfirm;
+      button.title = batchConfirmBlocker(batch).replace(/。$/, "");
+    };
+    const explainSelectedBatchConfirmState = () => {
+      const reason = batchConfirmBlocker(selectedBatch());
+      if (reason) setStatus(reason);
+    };
     const renderBatches = () => {
       el("batch-count").textContent = `${fmt(state.batches.length)} 个批次`;
       if (!state.batches.length) {
         el("batches").innerHTML = `<div class="empty">暂无批次。继续运行安全检测后会在这里出现审核项。</div>`;
+        updateBatchActionState();
         return;
       }
       el("batches").replaceChildren(...state.batches.map((batch) => {
@@ -836,6 +855,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
         node.addEventListener("click", () => selectBatch(batch.id));
         return node;
       }));
+      updateBatchActionState();
     };
     const renderSeries = () => {
       updateSeriesSelectionCount();
@@ -1328,8 +1348,8 @@ REVIEW_UI_HTML = r"""<!doctype html>
       state.offset = 0;
       renderBatches();
       el("ops-title").textContent = `批次 #${batchId}`;
-      el("confirm-batch").disabled = false;
       await loadOperations();
+      explainSelectedBatchConfirmState();
     };
     const loadOperations = async () => {
       if (!state.batchId) return;
@@ -1361,9 +1381,15 @@ REVIEW_UI_HTML = r"""<!doctype html>
       setStatus(`已排除操作 #${operationId}。`);
     };
     const confirmBatch = async () => {
-      if (!state.batchId) return;
-      if (!confirm(`确认批次 #${state.batchId}？这只会标记确认，不会移动文件。`)) return;
-      const result = await jsonFetch(`/operations/batches/${state.batchId}/confirm`, {method: "POST", auth: true});
+      const batch = selectedBatch();
+      const blocker = batchConfirmBlocker(batch);
+      if (blocker) {
+        setStatus(blocker);
+        updateBatchActionState();
+        return;
+      }
+      if (!confirm(`确认批次 #${batch.id}？这只会标记确认，不会移动文件。`)) return;
+      const result = await jsonFetch(`/operations/batches/${batch.id}/confirm`, {method: "POST", auth: true});
       await loadBatches();
       await loadOperations();
       await loadProgress();
@@ -1417,7 +1443,14 @@ REVIEW_UI_HTML = r"""<!doctype html>
     });
     el("prev-page").addEventListener("click", () => movePage(-1));
     el("next-page").addEventListener("click", () => movePage(1));
-    el("confirm-batch").addEventListener("click", confirmBatch);
+    el("confirm-batch").addEventListener("click", (event) => {
+      withButtonLoading(event.currentTarget, "确认中...", confirmBatch)
+        .then(updateBatchActionState)
+        .catch((error) => {
+          updateBatchActionState();
+          setStatus(`确认批次失败：${error.message}`);
+        });
+    });
     el("close-preview").addEventListener("click", closePreview);
     el("preview-modal").addEventListener("click", (event) => {
       if (event.target === el("preview-modal")) closePreview();
