@@ -49,6 +49,29 @@ function Invoke-Pims {
     }
 }
 
+function Invoke-WechatNotify {
+    param(
+        [string]$Title,
+        [string[]]$Lines = @()
+    )
+    $arguments = @("notify-wechat", "--title", $Title)
+    foreach ($line in $Lines) {
+        if (-not [string]::IsNullOrWhiteSpace($line)) {
+            $arguments += @("--line", $line)
+        }
+    }
+    try {
+        Write-RunLog "> python -m pims_v1.cli $($arguments -join ' ')"
+        & $Python -m pims_v1.cli @arguments 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            Write-Output $line
+            Add-RunLogLine $line
+        }
+    } catch {
+        Write-RunLog "WARN WeChat notification failed: $($_.Exception.Message)"
+    }
+}
+
 function Get-ProgressSummary {
     $code = @"
 import json
@@ -95,6 +118,11 @@ function Invoke-ConfirmedBatches {
 }
 
 Write-RunLog "Full detection started. Log: $LogPath"
+Invoke-WechatNotify -Title "PIMS full detection started" -Lines @(
+    "log=$LogPath",
+    "md5_limit=$Md5Limit phash_limit=$PhashLimit thumbnail_limit=$ThumbnailLimit",
+    "ai_suggest_limit=$AiSuggestLimit r18_scan_limit=$R18ScanLimit auto_archive_limit=$AutoArchiveLimit"
+)
 if ([string]::IsNullOrWhiteSpace($KeepRoot)) {
     Write-RunLog "KeepRoot=.env Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit AiSuggestLimit=$AiSuggestLimit R18ScanLimit=$R18ScanLimit AutoArchiveLimit=$AutoArchiveLimit SimilarLimit=$SimilarLimit SeriesLimit=$SeriesLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
 } else {
@@ -142,11 +170,22 @@ try {
             $phashComplete = [int]$assets.phash_total -eq 0 -or [int]$assets.phash_done -ge [int]$assets.phash_total
             if ($md5Complete -and $phashComplete) {
                 Write-RunLog "Full detection complete."
+                Invoke-WechatNotify -Title "PIMS full detection complete" -Lines @(
+                    "assets=$($assets.total)",
+                    "md5=$($assets.md5_done)/$($assets.total)",
+                    "phash=$($assets.phash_done)/$($assets.phash_total)",
+                    "pending_reviews=$($progress.reviews.pending)"
+                )
                 break
             }
         } catch {
             Write-RunLog "ERROR Round $round failed: $($_.Exception.Message)"
             Write-RunLog "ERROR $($_ | Out-String)"
+            Invoke-WechatNotify -Title "PIMS full detection round failed" -Lines @(
+                "round=$round",
+                "error=$($_.Exception.Message)",
+                "log=$LogPath"
+            )
         }
 
         Start-Sleep -Seconds $SleepSeconds
@@ -155,7 +194,17 @@ try {
     $exitCode = 1
     Write-RunLog "FATAL Full detection failed: $($_.Exception.Message)"
     Write-RunLog "FATAL $($_ | Out-String)"
+    Invoke-WechatNotify -Title "PIMS full detection fatal error" -Lines @(
+        "error=$($_.Exception.Message)",
+        "log=$LogPath"
+    )
 } finally {
     Write-RunLog "Full detection stopped. exit_code=$exitCode"
+    if ($exitCode -ne 0) {
+        Invoke-WechatNotify -Title "PIMS full detection stopped" -Lines @(
+            "exit_code=$exitCode",
+            "log=$LogPath"
+        )
+    }
 }
 exit $exitCode

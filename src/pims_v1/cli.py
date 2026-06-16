@@ -16,6 +16,7 @@ from pims_v1.services.deepseek_client import DeepSeekClient
 from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
 from pims_v1.services.hash_index_service import compute_missing_md5
 from pims_v1.services.index_service import index_library
+from pims_v1.services.notification_service import notify_workflow_event
 from pims_v1.services.operation_plan_service import (
     confirm_operation_batch,
     create_duplicate_quarantine_plan,
@@ -169,6 +170,11 @@ def build_parser() -> ArgumentParser:
     backup.add_argument("--database-url", default=settings.database_url)
     backup.add_argument("--backup-dir", default="./data/backups")
     backup.add_argument("--label", default="manual")
+
+    notify_wechat = subparsers.add_parser("notify-wechat")
+    notify_wechat.add_argument("--webhook-url", default=settings.wechat_webhook_url)
+    notify_wechat.add_argument("--title", required=True)
+    notify_wechat.add_argument("--line", action="append", default=[])
 
     return parser
 
@@ -754,6 +760,18 @@ def run_backup_db(database_url: str, backup_dir: str, label: str) -> int:
     return 0
 
 
+def run_notify_wechat(webhook_url: str | None, title: str, lines: list[str]) -> int:
+    result = notify_workflow_event(
+        webhook_url=webhook_url,
+        title=title,
+        lines=lines,
+    )
+    print(f"sent={result['sent']}")
+    print(f"failed={result['failed']}")
+    print(f"skipped={result['skipped']}")
+    return 0 if result["failed"] == 0 else 1
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -877,6 +895,12 @@ def main() -> int:
             database_url=args.database_url,
             backup_dir=args.backup_dir,
             label=args.label,
+        )
+    if args.command == "notify-wechat":
+        return run_notify_wechat(
+            webhook_url=args.webhook_url,
+            title=args.title,
+            lines=args.line,
         )
     return 1
 

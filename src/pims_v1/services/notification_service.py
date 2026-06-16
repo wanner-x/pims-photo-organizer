@@ -29,6 +29,24 @@ def send_wechat_text_message(webhook_url: str, content: str, timeout: float = 10
     return json.loads(response_body) if response_body else {}
 
 
+def notify_workflow_event(
+    *,
+    webhook_url: str | None,
+    title: str,
+    lines: list[str] | tuple[str, ...] = (),
+    sender: WechatSender = send_wechat_text_message,
+) -> dict[str, int]:
+    if not webhook_url:
+        return {"sent": 0, "failed": 0, "skipped": 1}
+
+    content = "\n".join([title, *[line for line in lines if line]])
+    try:
+        sender(webhook_url, content)
+    except Exception:
+        return {"sent": 0, "failed": 1, "skipped": 0}
+    return {"sent": 1, "failed": 0, "skipped": 0}
+
+
 def _reserve_notification(
     *,
     session: Session,

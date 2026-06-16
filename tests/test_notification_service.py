@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from pims_v1.db import Base
 from pims_v1.models import notification
 from pims_v1.models.notification import NotificationRecord
-from pims_v1.services.notification_service import notify_duplicate_approval_needed
+from pims_v1.services.notification_service import notify_duplicate_approval_needed, notify_workflow_event
 
 
 def make_session(tmp_path):
@@ -12,6 +12,36 @@ def make_session(tmp_path):
     Base.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     return session_factory()
+
+
+def test_notify_workflow_event_sends_multiline_message():
+    sent_messages = []
+
+    result = notify_workflow_event(
+        webhook_url="https://example.test/webhook",
+        title="PIMS workflow failed",
+        lines=["round=3", "error=boom"],
+        sender=lambda webhook_url, content: sent_messages.append((webhook_url, content)) or {"errcode": 0},
+    )
+
+    assert result == {"sent": 1, "failed": 0, "skipped": 0}
+    assert sent_messages == [
+        (
+            "https://example.test/webhook",
+            "PIMS workflow failed\nround=3\nerror=boom",
+        )
+    ]
+
+
+def test_notify_workflow_event_skips_without_webhook():
+    result = notify_workflow_event(
+        webhook_url=None,
+        title="PIMS workflow started",
+        lines=["round=1"],
+        sender=lambda webhook_url, content: {"errcode": 0},
+    )
+
+    assert result == {"sent": 0, "failed": 0, "skipped": 1}
 
 
 def test_notify_duplicate_approval_needed_skips_already_sent_batch(tmp_path):

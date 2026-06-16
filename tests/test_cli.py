@@ -26,6 +26,39 @@ def test_scan_sample_cli_reports_media_files(tmp_path, capsys, monkeypatch):
     assert ".jpg: 1" in output
 
 
+def test_notify_wechat_cli_sends_workflow_message(capsys, monkeypatch):
+    calls = []
+
+    def fake_notify(**kwargs):
+        calls.append(kwargs)
+        return {"sent": 1, "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr("pims_v1.cli.notify_workflow_event", fake_notify)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "pims",
+            "notify-wechat",
+            "--webhook-url",
+            "https://example.test/webhook",
+            "--title",
+            "PIMS started",
+            "--line",
+            "round=1",
+            "--line",
+            "status=running",
+        ],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert "sent=1" in output
+    assert calls[0]["webhook_url"] == "https://example.test/webhook"
+    assert calls[0]["title"] == "PIMS started"
+    assert calls[0]["lines"] == ["round=1", "status=running"]
+
+
 def test_index_library_cli_writes_to_requested_database(tmp_path, capsys, monkeypatch):
     library_root = tmp_path / "library"
     library_root.mkdir()
