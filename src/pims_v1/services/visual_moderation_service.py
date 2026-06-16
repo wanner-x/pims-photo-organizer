@@ -5,6 +5,7 @@ from typing import Protocol
 
 from PIL import Image
 
+from pims_v1.services.image_open_service import ImageProcessingError, safe_image_open
 
 class VisualModerationClient(Protocol):
     provider_name: str
@@ -17,9 +18,17 @@ class HeuristicVisualModerationClient:
     provider_name = "heuristic"
 
     def moderate_image(self, path: Path) -> dict[str, object]:
-        with Image.open(path) as image:
-            rgb = image.convert("RGB")
-            score = _estimate_skin_ratio_score(rgb)
+        try:
+            with safe_image_open(path) as image:
+                rgb = image.convert("RGB")
+                score = _estimate_skin_ratio_score(rgb)
+        except ImageProcessingError as exc:
+            return {
+                "label": "error",
+                "score": 0.0,
+                "reason": str(exc),
+                "provider": self.provider_name,
+            }
         return {
             "label": "nsfw_suspected" if score >= 0.55 else "safe",
             "score": score,

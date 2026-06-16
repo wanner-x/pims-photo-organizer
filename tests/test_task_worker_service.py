@@ -159,3 +159,28 @@ def test_process_phash_tasks_skips_non_image_task(tmp_path):
     assert asset_row.hash_phash is None
     assert asset_row.stage == "phash_skipped_non_image"
     assert task.status == "completed"
+
+
+def test_process_phash_tasks_marks_decompression_bomb_failed(tmp_path, monkeypatch):
+    from PIL import Image
+    import pims_v1.services.image_open_service as image_open_service
+
+    session = make_session(tmp_path)
+    source = tmp_path / "huge.jpg"
+    Image.new("RGB", (8, 8), color="white").save(source)
+    asset_row = add_asset(session, source)
+    task = enqueue_task(session, "hash_phash", "asset", asset_row.id)
+
+    def raise_decompression_bomb(_path):
+        raise Image.DecompressionBombWarning("too many pixels")
+
+    monkeypatch.setattr(image_open_service.Image, "open", raise_decompression_bomb)
+
+    summary = process_phash_tasks(session=session, limit=10)
+
+    session.refresh(asset_row)
+    session.refresh(task)
+    assert summary == {"processed": 0, "failed": 1, "skipped_non_image": 0}
+    assert asset_row.hash_phash is None
+    assert task.status == "failed"
+    assert "too many pixels" in task.last_error

@@ -1,10 +1,10 @@
 from pathlib import Path
 
 import imagehash
-from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
 from pims_v1.models.asset import Asset
+from pims_v1.services.image_open_service import ImageProcessingError, safe_image_open
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
 
@@ -24,9 +24,9 @@ def compute_missing_phash(*, session: Session, limit: int | None = None) -> dict
             summary["skipped_missing"] += 1
             continue
         try:
-            with Image.open(path) as image:
+            with safe_image_open(path) as image:
                 asset.hash_phash = str(imagehash.phash(image))
-        except (OSError, UnidentifiedImageError):
+        except ImageProcessingError:
             summary["failed"] += 1
             continue
 

@@ -89,3 +89,26 @@ def test_ensure_thumbnail_reports_non_image(tmp_path):
         "status": "skipped_non_image",
         "path": None,
     }
+
+
+def test_ensure_thumbnail_reports_decompression_bomb_as_failed(tmp_path, monkeypatch):
+    from PIL import Image
+    import pims_v1.services.image_open_service as image_open_service
+
+    session = make_session(tmp_path)
+    source = tmp_path / "huge.jpg"
+    Image.new("RGB", (8, 8), color="white").save(source)
+    asset_row = add_asset(session, source)
+
+    def raise_decompression_bomb(_path):
+        raise Image.DecompressionBombWarning("too many pixels")
+
+    monkeypatch.setattr(image_open_service.Image, "open", raise_decompression_bomb)
+
+    result = ensure_thumbnail(session=session, asset_id=asset_row.id, cache_root=tmp_path / ".cache")
+
+    assert result == {
+        "asset_id": asset_row.id,
+        "status": "failed",
+        "path": None,
+    }

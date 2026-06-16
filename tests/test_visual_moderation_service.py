@@ -32,3 +32,22 @@ def test_heuristic_visual_moderation_keeps_blue_image_below_review_threshold(tmp
     assert result["provider"] == "heuristic"
     assert result["label"] == "safe"
     assert result["score"] < 0.55
+
+
+def test_heuristic_visual_moderation_returns_error_for_decompression_bomb(tmp_path, monkeypatch):
+    import pims_v1.services.image_open_service as image_open_service
+
+    image_path = tmp_path / "huge.jpg"
+    Image.new("RGB", (48, 48), color=(220, 180, 160)).save(image_path)
+
+    def raise_decompression_bomb(_path):
+        raise Image.DecompressionBombWarning("too many pixels")
+
+    monkeypatch.setattr(image_open_service.Image, "open", raise_decompression_bomb)
+
+    result = HeuristicVisualModerationClient().moderate_image(image_path)
+
+    assert result["provider"] == "heuristic"
+    assert result["label"] == "error"
+    assert result["score"] == 0.0
+    assert "too many pixels" in result["reason"]

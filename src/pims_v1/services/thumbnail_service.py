@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
 from pims_v1.models.asset import Asset
+from pims_v1.services.image_open_service import ImageProcessingError, safe_image_open
 from pims_v1.services.phash_index_service import IMAGE_SUFFIXES
 
 
@@ -32,10 +32,10 @@ def ensure_thumbnail(
         return {"asset_id": asset.id, "status": "exists", "path": str(destination)}
 
     try:
-        with Image.open(source) as image:
+        with safe_image_open(source) as image:
             image.thumbnail(size)
             image.convert("RGB").save(destination, "JPEG", quality=85)
-    except (OSError, UnidentifiedImageError):
+    except ImageProcessingError:
         return {"asset_id": asset.id, "status": "failed", "path": None}
 
     return {"asset_id": asset.id, "status": "created", "path": str(destination)}

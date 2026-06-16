@@ -3,12 +3,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import imagehash
-from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
 from pims_v1.models.asset import Asset
 from pims_v1.models.processing import ProcessingTask
 from pims_v1.services.hash_service import md5_file_bytes
+from pims_v1.services.image_open_service import ImageProcessingError, safe_image_open
 from pims_v1.services.phash_index_service import IMAGE_SUFFIXES
 
 
@@ -144,9 +144,9 @@ def process_phash_tasks(
                 summary["failed"] += 1
             else:
                 try:
-                    with Image.open(path) as image:
+                    with safe_image_open(path) as image:
                         asset.hash_phash = str(imagehash.phash(image))
-                except (OSError, UnidentifiedImageError) as exc:
+                except ImageProcessingError as exc:
                     _mark_failed(task, f"phash failed: {exc}")
                     summary["failed"] += 1
                 else:
