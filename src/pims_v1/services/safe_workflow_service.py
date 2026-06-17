@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from pims_v1.config import settings
 from pims_v1.models.asset import Asset
+from pims_v1.models.duplicate import DuplicateGroup
 from pims_v1.models.processing import ProcessingTask
+from pims_v1.models.review import ReviewItem
 from pims_v1.services.ai_naming_service import NamingClient, suggest_series_organization_candidates
 from pims_v1.services.archive_decision_service import auto_archive_candidates
 from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
@@ -76,7 +78,13 @@ def _empty_series_summary() -> dict[str, int]:
     }
 
 
-def _active_task_subject_ids(session: Session, task_type: str, asset_ids: list[int]) -> set[int]:
+def _existing_duplicate_summary(session: Session) -> dict[str, int]:
+    groups = session.query(DuplicateGroup).count()
+    review_items = session.query(ReviewItem).filter(ReviewItem.item_type == "duplicate_exact").count()
+    return {"groups": groups, "review_items": review_items, "skipped": 1}
+
+
+def _existing_task_subject_ids(session: Session, task_type: str, asset_ids: list[int]) -> set[int]:
     if not asset_ids:
         return set()
     rows = (
@@ -85,7 +93,6 @@ def _active_task_subject_ids(session: Session, task_type: str, asset_ids: list[i
             ProcessingTask.task_type == task_type,
             ProcessingTask.subject_type == "asset",
             ProcessingTask.subject_id.in_(asset_ids),
-            ProcessingTask.status.in_(("pending", "running")),
         )
         .all()
     )
@@ -95,7 +102,7 @@ def _active_task_subject_ids(session: Session, task_type: str, asset_ids: list[i
 def _enqueue_hash_tasks(session: Session, task_type: str, hash_column, limit: int) -> int:
     query = session.query(Asset).filter(hash_column.is_(None)).order_by(Asset.id).limit(limit)
     assets = query.all()
-    existing_subject_ids = _active_task_subject_ids(session, task_type, [asset.id for asset in assets])
+    existing_subject_ids = _existing_task_subject_ids(session, task_type, [asset.id for asset in assets])
     tasks = [
         ProcessingTask(
             task_type=task_type,
@@ -119,7 +126,7 @@ def _enqueue_phash_tasks(session: Session, limit: int) -> int:
         .limit(limit)
     )
     assets = query.all()
-    existing_subject_ids = _active_task_subject_ids(session, "hash_phash", [asset.id for asset in assets])
+    existing_subject_ids = _existing_task_subject_ids(session, "hash_phash", [asset.id for asset in assets])
     tasks = [
         ProcessingTask(
             task_type="hash_phash",
@@ -193,7 +200,9 @@ def run_safe_workflow(
         limit=md5_limit,
         progress_callback=progress_callback,
     )
-    duplicates = build_exact_duplicate_reviews(session=session)
+    duplicates = _existing_duplicate_summary(session)
+    if md5_queued > 0 or duplicates["review_items"] == 0:
+        duplicates = build_exact_duplicate_reviews(session=session)
     phash_queued = _enqueue_phash_tasks(session, phash_limit)
     phash = process_phash_tasks(
         session=session,

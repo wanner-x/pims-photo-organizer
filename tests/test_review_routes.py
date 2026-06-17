@@ -379,7 +379,7 @@ def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["total"] == 1
-    assert payload["limit"] == 200
+    assert payload["limit"] == 50
     assert payload["offset"] == 0
     assert payload["items"] == [
         {
@@ -432,6 +432,52 @@ def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
             ],
         }
     ]
+
+
+def test_operations_api_clamps_large_batch_operation_limit(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    batch = OperationBatch(
+        batch_type="duplicate_quarantine",
+        status="planned",
+        description="Keep copies under /nas; quarantine duplicate copies elsewhere.",
+    )
+    session.add(batch)
+    session.flush()
+    for index in range(60):
+        session.add(
+            Operation(
+                batch_id=batch.id,
+                operation_type="quarantine_duplicate",
+                from_path=f"/library/{index}.jpg",
+                status="planned",
+            )
+        )
+    session.commit()
+    batch_id = batch.id
+    session.close()
+
+    def override_get_session():
+        test_session = session_factory()
+        try:
+            yield test_session
+        finally:
+            test_session.close()
+
+    app.dependency_overrides[get_session] = override_get_session
+    try:
+        client = TestClient(app)
+        response = client.get(f"/operations/batches/{batch_id}/operations", params={"limit": 500})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["limit"] == 50
+    assert len(payload["items"]) == 50
+    assert payload["total"] == 60
 
 
 def test_thumbnail_route_serves_cached_thumbnail(tmp_path):

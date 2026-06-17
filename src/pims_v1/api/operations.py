@@ -39,10 +39,12 @@ def list_batches(session: Session = Depends(get_session)) -> dict[str, list]:
 def list_operations_for_batch(
     batch_id: int,
     status: str | None = None,
-    limit: int = 200,
+    limit: int = 50,
     offset: int = 0,
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
+    limit = max(1, min(limit, 50))
+    offset = max(0, offset)
     operations = list_batch_operations(
         session=session,
         batch_id=batch_id,

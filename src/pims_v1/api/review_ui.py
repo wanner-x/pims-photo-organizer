@@ -689,7 +689,7 @@ REVIEW_UI_HTML = r"""<!doctype html>
       batches: [],
       batchId: null,
       offset: 0,
-      limit: 100,
+      limit: 30,
       total: 0,
       series: [],
       archiveOverview: null,

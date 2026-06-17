@@ -1,13 +1,24 @@
 from sqlalchemy import create_engine
 from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from pims_v1.config import settings
 from pims_v1.models.base import Base
 
 
 _sqlite_connect_args = {"timeout": 30} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=_sqlite_connect_args, future=True)
+_sqlite_pool_args = (
+    {"poolclass": NullPool}
+    if settings.database_url.startswith("sqlite") and ":memory:" not in settings.database_url
+    else {}
+)
+engine = create_engine(
+    settings.database_url,
+    connect_args=_sqlite_connect_args,
+    future=True,
+    **_sqlite_pool_args,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 

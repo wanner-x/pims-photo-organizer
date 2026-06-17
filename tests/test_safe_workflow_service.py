@@ -7,6 +7,8 @@ from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup
 from pims_v1.models.library import Library
 from pims_v1.models.operation import Operation
+from pims_v1.models.processing import ProcessingTask
+from pims_v1.models.review import ReviewItem
 from pims_v1.models.series import Series, SeriesCandidate, SeriesSuggestion
 from pims_v1.services.safe_workflow_service import run_safe_workflow
 
@@ -97,6 +99,51 @@ def test_run_safe_workflow_builds_candidates_and_duplicate_plan(tmp_path):
     assert session.query(DuplicateGroup).count() == 1
     assert session.query(SeriesCandidate).count() == 2
     assert session.query(Operation).one().from_path == str(local_file)
+
+
+def test_run_safe_workflow_skips_duplicate_rebuild_when_hashes_unchanged(tmp_path, monkeypatch):
+    session = make_session(tmp_path)
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    session.add(
+        Asset(
+            library_id=library_row.id,
+            original_path="/library/a.jpg",
+            current_path="/library/a.jpg",
+            file_name="a.jpg",
+            file_ext=".jpg",
+            file_size=1,
+            mtime=1.0,
+            hash_md5="same",
+        )
+    )
+    group = DuplicateGroup(hash_md5="same", asset_count=2)
+    session.add(group)
+    session.flush()
+    session.add(ReviewItem(item_type="duplicate_exact", subject_id=group.id, priority=10))
+    session.commit()
+
+    def fail_duplicate_rebuild(**_kwargs):
+        raise AssertionError("duplicate rebuild should be skipped")
+
+    monkeypatch.setattr(
+        "pims_v1.services.safe_workflow_service.build_exact_duplicate_reviews",
+        fail_duplicate_rebuild,
+    )
+
+    summary = run_safe_workflow(
+        session=session,
+        keep_root=None,
+        cache_root=tmp_path / ".cache",
+        md5_limit=10,
+        phash_limit=0,
+        thumbnail_limit=0,
+        auto_archive_limit=0,
+    )
+
+    assert summary["md5"]["processed"] == 0
+    assert summary["duplicates"] == {"groups": 1, "review_items": 1, "skipped": 1}
 
 
 def test_run_safe_workflow_notifies_when_duplicate_plan_needs_approval(tmp_path, monkeypatch):
@@ -217,6 +264,49 @@ def test_run_safe_workflow_only_enqueues_images_for_phash(tmp_path):
     assert summary["phash_enqueued"]["queued"] == 1
     assert summary["phash"]["processed"] == 1
     assert summary["phash"]["skipped_non_image"] == 0
+
+
+def test_run_safe_workflow_does_not_requeue_failed_phash_tasks(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path="/library/too-large.jpg",
+        current_path="/library/too-large.jpg",
+        file_name="too-large.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+        hash_md5="already-hashed",
+    )
+    session.add(asset_row)
+    session.flush()
+    session.add(
+        ProcessingTask(
+            task_type="hash_phash",
+            subject_type="asset",
+            subject_id=asset_row.id,
+            status="failed",
+            last_error="phash failed: too many pixels",
+        )
+    )
+    session.commit()
+
+    summary = run_safe_workflow(
+        session=session,
+        keep_root=None,
+        cache_root=tmp_path / ".cache",
+        md5_limit=0,
+        phash_limit=10,
+        thumbnail_limit=0,
+        auto_archive_limit=0,
+    )
+
+    assert summary["phash_enqueued"]["queued"] == 0
+    assert summary["phash"]["processed"] == 0
+    assert session.query(ProcessingTask).filter(ProcessingTask.task_type == "hash_phash").count() == 1
 
 
 def test_run_safe_workflow_skips_similar_reviews_by_default(tmp_path, monkeypatch):
