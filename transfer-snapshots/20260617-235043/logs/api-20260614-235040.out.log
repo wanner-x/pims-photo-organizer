@@ -1,0 +1,17 @@
+INFO:     127.0.0.1:61861 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57578 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61216 - "GET /review-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65429 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65429 - "GET /operations/batches/6/operations?limit=100&offset=0&status=planned HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61216 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61216 - "GET /operations/batches/6/operations?limit=100&offset=0&status=planned HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57008 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52843 - "GET /progress/logs/latest?lines=80 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54879 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63632 - "POST /operations/batches/6/confirm HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:63452 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63451 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54703 - "GET /progress/logs/latest?lines=40 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64643 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64671 - "GET /progress/summary HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:54682 - "GET /progress/summary HTTP/1.1" 200 OK

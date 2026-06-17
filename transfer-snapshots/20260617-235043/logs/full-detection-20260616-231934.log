@@ -1,0 +1,8 @@
+2026-06-16 23:19:34 Full detection started. Log: C:\Users\Administrator\Desktop\Codex\pims-v1\data\logs\full-detection-20260616-231934.log
+2026-06-16 23:19:34 KeepRoot=.env Md5Limit=20000 PhashLimit=5000 ThumbnailLimit=2000 AiSuggestLimit=50 R18ScanLimit=50 AutoArchiveLimit=20 SimilarLimit=0 SeriesLimit=0 ExecuteConfirmedBatches=True
+2026-06-16 23:19:35 ===== Round 1 started =====
+2026-06-16 23:19:36 > python -m pims_v1.cli backup-db --label full-detection-round-1-20260616-231934
+database_url=sqlite:///./data/pims.db
+status=created
+path=data\backups\full-detection-round-1-20260616-231934-pims.db
+2026-06-16 23:19:39 > python -m pims_v1.cli run-safe-workflow --md5-limit 20000 --phash-limit 5000 --thumbnail-limit 2000 --ai-suggest-limit 50 --r18-scan-limit 50 --auto-archive-limit 20 --similar-limit 0 --series-limit 0 --min-series-assets 2

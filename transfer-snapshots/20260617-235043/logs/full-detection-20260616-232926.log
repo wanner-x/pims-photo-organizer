@@ -1,0 +1,471 @@
+2026-06-16 23:29:26 Full detection started. Log: C:\Users\Administrator\Desktop\Codex\pims-v1\data\logs\full-detection-20260616-232926.log
+2026-06-16 23:29:26 > python -m pims_v1.cli notify-wechat --title PIMS full detection started --line log=C:\Users\Administrator\Desktop\Codex\pims-v1\data\logs\full-detection-20260616-232926.log --line md5_limit=20000 phash_limit=5000 thumbnail_limit=2000 --line ai_suggest_limit=50 r18_scan_limit=50 auto_archive_limit=20
+sent=0
+failed=0
+skipped=1
+2026-06-16 23:29:27 KeepRoot=.env Md5Limit=20000 PhashLimit=5000 ThumbnailLimit=2000 AiSuggestLimit=50 R18ScanLimit=50 AutoArchiveLimit=20 SimilarLimit=0 SeriesLimit=0 ExecuteConfirmedBatches=True
+2026-06-16 23:29:27 ===== Round 1 started =====
+2026-06-16 23:29:28 > python -m pims_v1.cli backup-db --label full-detection-round-1-20260616-232926
+database_url=sqlite:///./data/pims.db
+status=created
+path=data\backups\full-detection-round-1-20260616-232926-pims.db
+2026-06-16 23:29:30 > python -m pims_v1.cli run-safe-workflow --md5-limit 20000 --phash-limit 5000 --thumbnail-limit 2000 --ai-suggest-limit 50 --r18-scan-limit 50 --auto-archive-limit 20 --similar-limit 0 --series-limit 0 --min-series-assets 2
+progress.hash_phash.seen=50 processed=0 failed=50
+progress.hash_phash.seen=100 processed=6 failed=94
+progress.hash_phash.seen=150 processed=11 failed=139
+progress.hash_phash.seen=200 processed=17 failed=183
+progress.hash_phash.seen=250 processed=26 failed=224
+progress.hash_phash.seen=300 processed=34 failed=266
+progress.hash_phash.seen=350 processed=39 failed=311
+progress.hash_phash.seen=400 processed=42 failed=358
+progress.hash_phash.seen=450 processed=52 failed=398
+progress.hash_phash.seen=500 processed=56 failed=444
+progress.hash_phash.seen=550 processed=58 failed=492
+progress.hash_phash.seen=600 processed=59 failed=541
+progress.hash_phash.seen=650 processed=62 failed=588
+progress.hash_phash.seen=700 processed=76 failed=624
+progress.hash_phash.seen=750 processed=126 failed=624
+progress.hash_phash.seen=800 processed=176 failed=624
+progress.hash_phash.seen=850 processed=214 failed=636
+progress.hash_phash.seen=900 processed=218 failed=682
+progress.hash_phash.seen=950 processed=220 failed=730
+progress.hash_phash.seen=1000 processed=221 failed=779
+progress.hash_phash.seen=1050 processed=230 failed=820
+progress.hash_phash.seen=1100 processed=236 failed=864
+progress.hash_phash.seen=1150 processed=238 failed=912
+progress.hash_phash.seen=1200 processed=240 failed=960
+progress.hash_phash.seen=1250 processed=243 failed=1007
+progress.hash_phash.seen=1300 processed=243 failed=1057
+progress.hash_phash.seen=1350 processed=244 failed=1106
+progress.hash_phash.seen=1400 processed=281 failed=1119
+progress.hash_phash.seen=1450 processed=331 failed=1119
+progress.hash_phash.seen=1500 processed=381 failed=1119
+progress.hash_phash.seen=1550 processed=431 failed=1119
+progress.hash_phash.seen=1600 processed=481 failed=1119
+progress.hash_phash.seen=1650 processed=531 failed=1119
+progress.hash_phash.seen=1700 processed=581 failed=1119
+progress.hash_phash.seen=1750 processed=631 failed=1119
+progress.hash_phash.seen=1800 processed=681 failed=1119
+progress.hash_phash.seen=1850 processed=731 failed=1119
+progress.hash_phash.seen=1900 processed=781 failed=1119
+progress.hash_phash.seen=1950 processed=831 failed=1119
+progress.hash_phash.seen=2000 processed=881 failed=1119
+progress.hash_phash.seen=2050 processed=931 failed=1119
+progress.hash_phash.seen=2100 processed=981 failed=1119
+progress.hash_phash.seen=2150 processed=1031 failed=1119
+progress.hash_phash.seen=2200 processed=1081 failed=1119
+progress.hash_phash.seen=2250 processed=1131 failed=1119
+progress.hash_phash.seen=2300 processed=1181 failed=1119
+progress.hash_phash.seen=2350 processed=1231 failed=1119
+progress.hash_phash.seen=2400 processed=1281 failed=1119
+progress.hash_phash.seen=2450 processed=1331 failed=1119
+progress.hash_phash.seen=2500 processed=1381 failed=1119
+progress.hash_phash.seen=2550 processed=1431 failed=1119
+progress.hash_phash.seen=2600 processed=1481 failed=1119
+progress.hash_phash.seen=2650 processed=1531 failed=1119
+progress.hash_phash.seen=2700 processed=1581 failed=1119
+progress.hash_phash.seen=2750 processed=1631 failed=1119
+progress.hash_phash.seen=2800 processed=1681 failed=1119
+progress.hash_phash.seen=2850 processed=1731 failed=1119
+progress.hash_phash.seen=2900 processed=1781 failed=1119
+progress.hash_phash.seen=2950 processed=1831 failed=1119
+progress.hash_phash.seen=3000 processed=1881 failed=1119
+progress.hash_phash.seen=3050 processed=1931 failed=1119
+progress.hash_phash.seen=3100 processed=1981 failed=1119
+progress.hash_phash.seen=3150 processed=2031 failed=1119
+progress.hash_phash.seen=3200 processed=2081 failed=1119
+progress.hash_phash.seen=3250 processed=2131 failed=1119
+progress.hash_phash.seen=3300 processed=2181 failed=1119
+progress.hash_phash.seen=3350 processed=2231 failed=1119
+progress.hash_phash.seen=3400 processed=2281 failed=1119
+progress.hash_phash.seen=3450 processed=2331 failed=1119
+progress.hash_phash.seen=3500 processed=2381 failed=1119
+progress.hash_phash.seen=3550 processed=2431 failed=1119
+progress.hash_phash.seen=3600 processed=2481 failed=1119
+progress.hash_phash.seen=3650 processed=2531 failed=1119
+progress.hash_phash.seen=3700 processed=2581 failed=1119
+progress.hash_phash.seen=3750 processed=2631 failed=1119
+progress.hash_phash.seen=3800 processed=2681 failed=1119
+progress.hash_phash.seen=3850 processed=2731 failed=1119
+progress.hash_phash.seen=3900 processed=2781 failed=1119
+progress.hash_phash.seen=3950 processed=2831 failed=1119
+progress.hash_phash.seen=4000 processed=2881 failed=1119
+progress.hash_phash.seen=4050 processed=2931 failed=1119
+progress.hash_phash.seen=4100 processed=2981 failed=1119
+progress.hash_phash.seen=4150 processed=3031 failed=1119
+progress.hash_phash.seen=4200 processed=3081 failed=1119
+progress.hash_phash.seen=4250 processed=3131 failed=1119
+progress.hash_phash.seen=4300 processed=3181 failed=1119
+progress.hash_phash.seen=4350 processed=3231 failed=1119
+progress.hash_phash.seen=4400 processed=3281 failed=1119
+progress.hash_phash.seen=4450 processed=3331 failed=1119
+progress.hash_phash.seen=4500 processed=3381 failed=1119
+progress.hash_phash.seen=4550 processed=3431 failed=1119
+progress.hash_phash.seen=4600 processed=3481 failed=1119
+progress.hash_phash.seen=4650 processed=3531 failed=1119
+progress.hash_phash.seen=4700 processed=3581 failed=1119
+progress.hash_phash.seen=4750 processed=3631 failed=1119
+progress.hash_phash.seen=4800 processed=3681 failed=1119
+progress.hash_phash.seen=4850 processed=3731 failed=1119
+progress.hash_phash.seen=4900 processed=3781 failed=1119
+progress.hash_phash.seen=4950 processed=3831 failed=1119
+progress.hash_phash.seen=5000 processed=3881 failed=1119
+database_url=sqlite:///./data/pims.db
+recovered.recovered=0
+md5_enqueued.queued=0
+md5.processed=0
+md5.failed=0
+md5.skipped_oversize=0
+duplicates.groups=236266
+duplicates.review_items=0
+phash_enqueued.queued=0
+phash.processed=3881
+phash.failed=1119
+phash.skipped_non_image=0
+similar.groups=0
+similar.review_items=0
+similar.skipped=1
+series.candidates=0
+series.review_items=0
+series.skipped=1
+thumbnails.created=0
+thumbnails.exists=1342
+thumbnails.skipped_non_image=24
+thumbnails.missing=634
+thumbnails.failed=0
+ai_suggest.considered=50
+ai_suggest.processed=50
+ai_suggest.suggested=50
+ai_suggest.skipped=0
+ai_suggest.failed=0
+r18_scan.considered=50
+r18_scan.processed=50
+r18_scan.flagged=5
+r18_scan.review_required=11
+r18_scan.incomplete=0
+r18_scan.failed=0
+archive_auto.considered=20
+archive_auto.processed=20
+archive_auto.auto_apply=2
+archive_auto.auto_apply_sampled=0
+archive_auto.manual_review=18
+archive_auto.confirmed=0
+archive_auto.pending_review=18
+archive_auto.failed=2
+archive_auto.moved=0
+archive_auto.risk_events=32
+duplicate_plan.batch_id=7
+duplicate_plan.operations=231861
+notification.sent=0
+notification.failed=0
+notification.skipped=0
+2026-06-17 04:02:44 Progress: assets=558927 md5=558927/558927 phash=14820/556410 pending_reviews=243487
+2026-06-17 04:02:44 ===== Round 1 completed =====
+2026-06-17 04:02:49 ===== Round 2 started =====
+2026-06-17 04:02:51 > python -m pims_v1.cli run-safe-workflow --md5-limit 20000 --phash-limit 5000 --thumbnail-limit 2000 --ai-suggest-limit 50 --r18-scan-limit 50 --auto-archive-limit 20 --similar-limit 0 --series-limit 0 --min-series-assets 2
+progress.hash_phash.seen=50 processed=0 failed=50
+progress.hash_phash.seen=100 processed=0 failed=100
+progress.hash_phash.seen=150 processed=0 failed=150
+progress.hash_phash.seen=200 processed=0 failed=200
+progress.hash_phash.seen=250 processed=0 failed=250
+progress.hash_phash.seen=300 processed=0 failed=300
+progress.hash_phash.seen=350 processed=0 failed=350
+progress.hash_phash.seen=400 processed=0 failed=400
+progress.hash_phash.seen=450 processed=0 failed=450
+progress.hash_phash.seen=500 processed=0 failed=500
+progress.hash_phash.seen=550 processed=0 failed=550
+progress.hash_phash.seen=600 processed=0 failed=600
+progress.hash_phash.seen=650 processed=0 failed=650
+progress.hash_phash.seen=700 processed=0 failed=700
+progress.hash_phash.seen=750 processed=0 failed=750
+progress.hash_phash.seen=800 processed=0 failed=800
+progress.hash_phash.seen=850 processed=0 failed=850
+progress.hash_phash.seen=900 processed=0 failed=900
+progress.hash_phash.seen=950 processed=0 failed=950
+progress.hash_phash.seen=1000 processed=0 failed=1000
+progress.hash_phash.seen=1050 processed=0 failed=1050
+progress.hash_phash.seen=1100 processed=0 failed=1100
+progress.hash_phash.seen=1150 processed=31 failed=1119
+progress.hash_phash.seen=1200 processed=81 failed=1119
+progress.hash_phash.seen=1250 processed=103 failed=1147
+progress.hash_phash.seen=1300 processed=113 failed=1187
+progress.hash_phash.seen=1350 processed=163 failed=1187
+progress.hash_phash.seen=1400 processed=213 failed=1187
+progress.hash_phash.seen=1450 processed=263 failed=1187
+progress.hash_phash.seen=1500 processed=313 failed=1187
+progress.hash_phash.seen=1550 processed=363 failed=1187
+progress.hash_phash.seen=1600 processed=413 failed=1187
+progress.hash_phash.seen=1650 processed=463 failed=1187
+progress.hash_phash.seen=1700 processed=513 failed=1187
+progress.hash_phash.seen=1750 processed=563 failed=1187
+progress.hash_phash.seen=1800 processed=613 failed=1187
+progress.hash_phash.seen=1850 processed=663 failed=1187
+progress.hash_phash.seen=1900 processed=713 failed=1187
+progress.hash_phash.seen=1950 processed=763 failed=1187
+progress.hash_phash.seen=2000 processed=813 failed=1187
+progress.hash_phash.seen=2050 processed=847 failed=1203
+progress.hash_phash.seen=2100 processed=860 failed=1240
+progress.hash_phash.seen=2150 processed=861 failed=1289
+progress.hash_phash.seen=2200 processed=861 failed=1339
+progress.hash_phash.seen=2250 processed=862 failed=1388
+progress.hash_phash.seen=2300 processed=864 failed=1436
+progress.hash_phash.seen=2350 processed=867 failed=1483
+progress.hash_phash.seen=2400 processed=873 failed=1527
+progress.hash_phash.seen=2450 processed=873 failed=1577
+progress.hash_phash.seen=2500 processed=874 failed=1626
+progress.hash_phash.seen=2550 processed=878 failed=1672
+progress.hash_phash.seen=2600 processed=926 failed=1674
+progress.hash_phash.seen=2650 processed=976 failed=1674
+progress.hash_phash.seen=2700 processed=1026 failed=1674
+progress.hash_phash.seen=2750 processed=1076 failed=1674
+progress.hash_phash.seen=2800 processed=1126 failed=1674
+progress.hash_phash.seen=2850 processed=1176 failed=1674
+progress.hash_phash.seen=2900 processed=1226 failed=1674
+progress.hash_phash.seen=2950 processed=1276 failed=1674
+progress.hash_phash.seen=3000 processed=1326 failed=1674
+progress.hash_phash.seen=3050 processed=1376 failed=1674
+progress.hash_phash.seen=3100 processed=1426 failed=1674
+progress.hash_phash.seen=3150 processed=1476 failed=1674
+progress.hash_phash.seen=3200 processed=1526 failed=1674
+progress.hash_phash.seen=3250 processed=1576 failed=1674
+progress.hash_phash.seen=3300 processed=1626 failed=1674
+progress.hash_phash.seen=3350 processed=1676 failed=1674
+progress.hash_phash.seen=3400 processed=1689 failed=1711
+progress.hash_phash.seen=3450 processed=1689 failed=1761
+progress.hash_phash.seen=3500 processed=1689 failed=1811
+progress.hash_phash.seen=3550 processed=1689 failed=1861
+progress.hash_phash.seen=3600 processed=1689 failed=1911
+progress.hash_phash.seen=3650 processed=1689 failed=1961
+progress.hash_phash.seen=3700 processed=1689 failed=2011
+progress.hash_phash.seen=3750 processed=1689 failed=2061
+progress.hash_phash.seen=3800 processed=1689 failed=2111
+progress.hash_phash.seen=3850 processed=1689 failed=2161
+progress.hash_phash.seen=3900 processed=1689 failed=2211
+progress.hash_phash.seen=3950 processed=1689 failed=2261
+progress.hash_phash.seen=4000 processed=1689 failed=2311
+progress.hash_phash.seen=4050 processed=1689 failed=2361
+progress.hash_phash.seen=4100 processed=1689 failed=2411
+progress.hash_phash.seen=4150 processed=1689 failed=2461
+progress.hash_phash.seen=4200 processed=1689 failed=2511
+progress.hash_phash.seen=4250 processed=1689 failed=2561
+progress.hash_phash.seen=4300 processed=1689 failed=2611
+progress.hash_phash.seen=4350 processed=1689 failed=2661
+progress.hash_phash.seen=4400 processed=1689 failed=2711
+progress.hash_phash.seen=4450 processed=1689 failed=2761
+progress.hash_phash.seen=4500 processed=1689 failed=2811
+progress.hash_phash.seen=4550 processed=1689 failed=2861
+progress.hash_phash.seen=4600 processed=1689 failed=2911
+progress.hash_phash.seen=4650 processed=1690 failed=2960
+progress.hash_phash.seen=4700 processed=1691 failed=3009
+progress.hash_phash.seen=4750 processed=1691 failed=3059
+progress.hash_phash.seen=4800 processed=1691 failed=3109
+progress.hash_phash.seen=4850 processed=1691 failed=3159
+progress.hash_phash.seen=4900 processed=1692 failed=3208
+progress.hash_phash.seen=4950 processed=1692 failed=3258
+progress.hash_phash.seen=5000 processed=1692 failed=3308
+database_url=sqlite:///./data/pims.db
+recovered.recovered=0
+md5_enqueued.queued=0
+md5.processed=0
+md5.failed=0
+md5.skipped_oversize=0
+duplicates.groups=236266
+duplicates.review_items=0
+phash_enqueued.queued=5000
+phash.processed=1692
+phash.failed=3308
+phash.skipped_non_image=0
+similar.groups=0
+similar.review_items=0
+similar.skipped=1
+series.candidates=0
+series.review_items=0
+series.skipped=1
+thumbnails.created=0
+thumbnails.exists=1342
+thumbnails.skipped_non_image=24
+thumbnails.missing=634
+thumbnails.failed=0
+ai_suggest.considered=50
+ai_suggest.processed=49
+ai_suggest.suggested=49
+ai_suggest.skipped=0
+ai_suggest.failed=1
+r18_scan.considered=50
+r18_scan.processed=50
+r18_scan.flagged=2
+r18_scan.review_required=9
+r18_scan.incomplete=0
+r18_scan.failed=0
+archive_auto.considered=20
+archive_auto.processed=18
+archive_auto.auto_apply=0
+archive_auto.auto_apply_sampled=0
+archive_auto.manual_review=18
+archive_auto.confirmed=0
+archive_auto.pending_review=18
+archive_auto.failed=2
+archive_auto.moved=0
+archive_auto.risk_events=24
+duplicate_plan.batch_id=8
+duplicate_plan.operations=118259
+notification.sent=1
+notification.failed=0
+notification.skipped=0
+2026-06-17 11:56:12 Progress: assets=558927 md5=558927/558927 phash=16512/556410 pending_reviews=243487
+2026-06-17 11:56:12 ===== Round 2 completed =====
+2026-06-17 11:56:17 ===== Round 3 started =====
+2026-06-17 11:56:18 > python -m pims_v1.cli run-safe-workflow --md5-limit 20000 --phash-limit 5000 --thumbnail-limit 2000 --ai-suggest-limit 50 --r18-scan-limit 50 --auto-archive-limit 20 --similar-limit 0 --series-limit 0 --min-series-assets 2
+progress.hash_phash.seen=50 processed=0 failed=50
+progress.hash_phash.seen=100 processed=0 failed=100
+progress.hash_phash.seen=150 processed=0 failed=150
+progress.hash_phash.seen=200 processed=0 failed=200
+progress.hash_phash.seen=250 processed=0 failed=250
+progress.hash_phash.seen=300 processed=0 failed=300
+progress.hash_phash.seen=350 processed=0 failed=350
+progress.hash_phash.seen=400 processed=0 failed=400
+progress.hash_phash.seen=450 processed=0 failed=450
+progress.hash_phash.seen=500 processed=0 failed=500
+progress.hash_phash.seen=550 processed=0 failed=550
+progress.hash_phash.seen=600 processed=0 failed=600
+progress.hash_phash.seen=650 processed=0 failed=650
+progress.hash_phash.seen=700 processed=0 failed=700
+progress.hash_phash.seen=750 processed=0 failed=750
+progress.hash_phash.seen=800 processed=0 failed=800
+progress.hash_phash.seen=850 processed=0 failed=850
+progress.hash_phash.seen=900 processed=0 failed=900
+progress.hash_phash.seen=950 processed=0 failed=950
+progress.hash_phash.seen=1000 processed=0 failed=1000
+progress.hash_phash.seen=1050 processed=0 failed=1050
+progress.hash_phash.seen=1100 processed=0 failed=1100
+progress.hash_phash.seen=1150 processed=0 failed=1150
+progress.hash_phash.seen=1200 processed=0 failed=1200
+progress.hash_phash.seen=1250 processed=0 failed=1250
+progress.hash_phash.seen=1300 processed=0 failed=1300
+progress.hash_phash.seen=1350 processed=0 failed=1350
+progress.hash_phash.seen=1400 processed=0 failed=1400
+progress.hash_phash.seen=1450 processed=0 failed=1450
+progress.hash_phash.seen=1500 processed=0 failed=1500
+progress.hash_phash.seen=1550 processed=0 failed=1550
+progress.hash_phash.seen=1600 processed=0 failed=1600
+progress.hash_phash.seen=1650 processed=0 failed=1650
+progress.hash_phash.seen=1700 processed=0 failed=1700
+progress.hash_phash.seen=1750 processed=0 failed=1750
+progress.hash_phash.seen=1800 processed=0 failed=1800
+progress.hash_phash.seen=1850 processed=0 failed=1850
+progress.hash_phash.seen=1900 processed=0 failed=1900
+progress.hash_phash.seen=1950 processed=0 failed=1950
+progress.hash_phash.seen=2000 processed=0 failed=2000
+progress.hash_phash.seen=2050 processed=0 failed=2050
+progress.hash_phash.seen=2100 processed=0 failed=2100
+progress.hash_phash.seen=2150 processed=0 failed=2150
+progress.hash_phash.seen=2200 processed=0 failed=2200
+progress.hash_phash.seen=2250 processed=0 failed=2250
+progress.hash_phash.seen=2300 processed=0 failed=2300
+progress.hash_phash.seen=2350 processed=0 failed=2350
+progress.hash_phash.seen=2400 processed=0 failed=2400
+progress.hash_phash.seen=2450 processed=0 failed=2450
+progress.hash_phash.seen=2500 processed=0 failed=2500
+progress.hash_phash.seen=2550 processed=0 failed=2550
+progress.hash_phash.seen=2600 processed=0 failed=2600
+progress.hash_phash.seen=2650 processed=0 failed=2650
+progress.hash_phash.seen=2700 processed=0 failed=2700
+progress.hash_phash.seen=2750 processed=0 failed=2750
+progress.hash_phash.seen=2800 processed=0 failed=2800
+progress.hash_phash.seen=2850 processed=0 failed=2850
+progress.hash_phash.seen=2900 processed=0 failed=2900
+progress.hash_phash.seen=2950 processed=0 failed=2950
+progress.hash_phash.seen=3000 processed=0 failed=3000
+progress.hash_phash.seen=3050 processed=0 failed=3050
+progress.hash_phash.seen=3100 processed=0 failed=3100
+progress.hash_phash.seen=3150 processed=0 failed=3150
+progress.hash_phash.seen=3200 processed=0 failed=3200
+progress.hash_phash.seen=3250 processed=0 failed=3250
+progress.hash_phash.seen=3300 processed=0 failed=3300
+progress.hash_phash.seen=3350 processed=0 failed=3350
+progress.hash_phash.seen=3400 processed=0 failed=3400
+progress.hash_phash.seen=3450 processed=0 failed=3450
+progress.hash_phash.seen=3500 processed=0 failed=3500
+progress.hash_phash.seen=3550 processed=0 failed=3550
+progress.hash_phash.seen=3600 processed=0 failed=3600
+progress.hash_phash.seen=3650 processed=0 failed=3650
+progress.hash_phash.seen=3700 processed=0 failed=3700
+progress.hash_phash.seen=3750 processed=0 failed=3750
+progress.hash_phash.seen=3800 processed=0 failed=3800
+progress.hash_phash.seen=3850 processed=0 failed=3850
+progress.hash_phash.seen=3900 processed=19 failed=3881
+progress.hash_phash.seen=3950 processed=69 failed=3881
+progress.hash_phash.seen=4000 processed=119 failed=3881
+progress.hash_phash.seen=4050 processed=169 failed=3881
+progress.hash_phash.seen=4100 processed=219 failed=3881
+progress.hash_phash.seen=4150 processed=269 failed=3881
+progress.hash_phash.seen=4200 processed=319 failed=3881
+progress.hash_phash.seen=4250 processed=354 failed=3896
+progress.hash_phash.seen=4300 processed=356 failed=3944
+progress.hash_phash.seen=4350 processed=357 failed=3993
+progress.hash_phash.seen=4400 processed=357 failed=4043
+progress.hash_phash.seen=4450 processed=365 failed=4085
+progress.hash_phash.seen=4500 processed=390 failed=4110
+progress.hash_phash.seen=4550 processed=416 failed=4134
+progress.hash_phash.seen=4600 processed=441 failed=4159
+progress.hash_phash.seen=4650 processed=442 failed=4208
+progress.hash_phash.seen=4700 processed=444 failed=4256
+progress.hash_phash.seen=4750 processed=444 failed=4306
+progress.hash_phash.seen=4800 processed=444 failed=4356
+progress.hash_phash.seen=4850 processed=444 failed=4406
+progress.hash_phash.seen=4900 processed=444 failed=4456
+progress.hash_phash.seen=4950 processed=445 failed=4505
+progress.hash_phash.seen=5000 processed=445 failed=4555
+database_url=sqlite:///./data/pims.db
+recovered.recovered=0
+md5_enqueued.queued=0
+md5.processed=0
+md5.failed=0
+md5.skipped_oversize=0
+duplicates.groups=236266
+duplicates.review_items=0
+phash_enqueued.queued=5000
+phash.processed=445
+phash.failed=4555
+phash.skipped_non_image=0
+similar.groups=0
+similar.review_items=0
+similar.skipped=1
+series.candidates=0
+series.review_items=0
+series.skipped=1
+thumbnails.created=0
+thumbnails.exists=1342
+thumbnails.skipped_non_image=24
+thumbnails.missing=634
+thumbnails.failed=0
+ai_suggest.considered=50
+ai_suggest.processed=49
+ai_suggest.suggested=49
+ai_suggest.skipped=0
+ai_suggest.failed=1
+r18_scan.considered=50
+r18_scan.processed=50
+r18_scan.flagged=2
+r18_scan.review_required=13
+r18_scan.incomplete=0
+r18_scan.failed=0
+archive_auto.considered=20
+archive_auto.processed=15
+archive_auto.auto_apply=0
+archive_auto.auto_apply_sampled=0
+archive_auto.manual_review=15
+archive_auto.confirmed=0
+archive_auto.pending_review=15
+archive_auto.failed=5
+archive_auto.moved=0
+archive_auto.risk_events=24
+duplicate_plan.batch_id=0
+duplicate_plan.operations=0
+notification.sent=0
+notification.failed=0
+notification.skipped=0
+2026-06-17 20:34:55 Progress: assets=558927 md5=558927/558927 phash=16957/556410 pending_reviews=243487
+2026-06-17 20:34:55 ===== Round 3 completed =====
+2026-06-17 20:35:00 ===== Round 4 started =====
+2026-06-17 20:35:02 > python -m pims_v1.cli run-safe-workflow --md5-limit 20000 --phash-limit 5000 --thumbnail-limit 2000 --ai-suggest-limit 50 --r18-scan-limit 50 --auto-archive-limit 20 --similar-limit 0 --series-limit 0 --min-series-assets 2

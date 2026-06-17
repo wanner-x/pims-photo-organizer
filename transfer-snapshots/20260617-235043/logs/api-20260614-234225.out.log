@@ -1,0 +1,26 @@
+INFO:     127.0.0.1:53428 - "GET /review-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55544 - "GET /review-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64611 - "GET /review-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64325 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64611 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64611 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62609 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63082 - "GET /operations/batches/3/operations?limit=100&offset=0&status=planned HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63082 - "GET /operations/batches/6/operations?limit=100&offset=0&status=planned HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55853 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55870 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50682 - "GET /review-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49413 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50682 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49413 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49413 - "GET /operations/batches/6/operations?limit=100&offset=0&status=planned HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49413 - "POST /operations/batches/6/confirm HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:59385 - "GET /media/assets/1841 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50279 - "GET /review-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56536 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50279 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56536 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56536 - "GET /operations/batches/6/operations?limit=100&offset=0&status=planned HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56536 - "GET /operations/batches/6/operations?limit=100&offset=0&status=excluded HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56536 - "GET /operations/batches/6/operations?limit=100&offset=0&status=confirmed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63021 - "GET /operations/batches/6/operations?limit=5&offset=0&status=planned HTTP/1.1" 200 OK

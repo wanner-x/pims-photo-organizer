@@ -1,0 +1,46 @@
+INFO:     127.0.0.1:54729 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64887 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64955 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54163 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59546 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63423 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59020 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59129 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51100 - "GET /progress/summary HTTP/1.1" 200 OK
+INFO:     192.168.31.114:53136 - "GET /review-ui HTTP/1.1" 200 OK
+INFO:     192.168.31.114:53174 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     192.168.31.114:53158 - "GET /progress/logs/latest?lines=80 HTTP/1.1" 200 OK
+INFO:     192.168.31.114:53188 - "GET /progress/logs/latest?lines=80 HTTP/1.1" 200 OK
+INFO:     192.168.31.114:53188 - "GET /progress/logs/latest?lines=80 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64301 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.31.98:52005 - "GET /review-ui HTTP/1.1" 200 OK
+INFO:     192.168.31.98:60406 - "GET /progress/logs/latest?lines=80 HTTP/1.1" 200 OK
+INFO:     192.168.31.98:60406 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     192.168.31.98:52005 - "GET /progress/summary HTTP/1.1" 500 Internal Server Error
+INFO:     192.168.31.98:52074 - "GET /review/series?limit=20 HTTP/1.1" 500 Internal Server Error
+INFO:     192.168.31.98:55833 - "GET /review/archive/overview HTTP/1.1" 500 Internal Server Error
+INFO:     192.168.31.98:59631 - "GET /progress/summary HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:58835 - "GET /review-ui HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58836 - "GET /health HTTP/1.1" 200 OK
+INFO:     192.168.31.98:50276 - "GET /progress/summary HTTP/1.1" 500 Internal Server Error
+INFO:     127.0.0.1:58908 - "GET /progress/logs/latest?lines=20 HTTP/1.1" 200 OK
+INFO:     192.168.31.98:58835 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:64207 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:56510 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:52715 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:49600 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:50980 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:52982 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:61196 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:49729 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:65236 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:57964 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:59894 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:51699 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:63441 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:62377 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:52218 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:60576 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:49691 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:51484 - "GET /operations/batches HTTP/1.1" 200 OK
+INFO:     192.168.31.98:53960 - "GET /operations/batches HTTP/1.1" 200 OK

@@ -1,0 +1,6 @@
+INFO:     Started server process [6740]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     192.168.31.98:65428 - "WebSocket /ws/progress" [accepted]
+INFO:     connection open

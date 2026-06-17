@@ -1,0 +1,28 @@
+2026-06-13 06:19:03 Full detection started. Log: C:\Users\Administrator\Desktop\Codex\pims-v1\data\logs\full-detection-20260613-061903.log
+2026-06-13 06:19:03 KeepRoot=.env Md5Limit=20000 PhashLimit=5000 ThumbnailLimit=2000 ExecuteConfirmedBatches=True
+2026-06-13 06:19:03 ===== Round 1 started =====
+2026-06-13 06:19:05 > python -m pims_v1.cli backup-db --label full-detection-round-1-20260613-061903
+database_url=sqlite:///./data/pims.db
+status=created
+path=data\backups\full-detection-round-1-20260613-061903-pims.db
+2026-06-13 06:19:06 > python -m pims_v1.cli run-safe-workflow --md5-limit 20000 --phash-limit 5000 --thumbnail-limit 2000 --min-series-assets 2
+progress.hash_md5.seen=100 processed=100 failed=0
+progress.hash_md5.seen=200 processed=200 failed=0
+progress.hash_md5.seen=300 processed=300 failed=0
+progress.hash_md5.seen=400 processed=400 failed=0
+progress.hash_md5.seen=500 processed=500 failed=0
+progress.hash_md5.seen=600 processed=600 failed=0
+progress.hash_md5.seen=700 processed=700 failed=0
+progress.hash_md5.seen=800 processed=800 failed=0
+progress.hash_md5.seen=900 processed=900 failed=0
+progress.hash_md5.seen=1000 processed=1000 failed=0
+progress.hash_md5.seen=1100 processed=1100 failed=0
+progress.hash_md5.seen=1200 processed=1200 failed=0
+progress.hash_md5.seen=1300 processed=1300 failed=0
+progress.hash_md5.seen=1400 processed=1400 failed=0
+progress.hash_md5.seen=1500 processed=1500 failed=0
+progress.hash_md5.seen=1600 processed=1600 failed=0
+progress.hash_md5.seen=1700 processed=1700 failed=0
+progress.hash_md5.seen=1800 processed=1800 failed=0
+progress.hash_md5.seen=1900 processed=1900 failed=0
+progress.hash_md5.seen=2000 processed=2000 failed=0

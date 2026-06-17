@@ -1,0 +1,62 @@
+2026-06-12 16:01:32 Full detection started. Log: C:\Users\Administrator\Desktop\Codex\pims-v1\data\logs\full-detection-20260612-160132.log
+2026-06-12 16:01:32 KeepRoot=.env Md5Limit=20000 PhashLimit=5000 ThumbnailLimit=2000 ExecuteConfirmedBatches=True
+2026-06-12 16:01:32 ===== Round 1 started =====
+2026-06-12 16:01:33 > python -m pims_v1.cli backup-db --label full-detection-round-1-20260612-160132
+database_url=sqlite:///./data/pims.db
+status=created
+path=data\backups\full-detection-round-1-20260612-160132-pims.db
+2026-06-12 16:01:35 > python -m pims_v1.cli run-safe-workflow --md5-limit 20000 --phash-limit 5000 --thumbnail-limit 2000 --min-series-assets 2
+progress.hash_md5.seen=100 processed=100 failed=0
+progress.hash_md5.seen=200 processed=200 failed=0
+progress.hash_md5.seen=300 processed=300 failed=0
+progress.hash_md5.seen=400 processed=400 failed=0
+progress.hash_md5.seen=500 processed=500 failed=0
+progress.hash_md5.seen=600 processed=600 failed=0
+progress.hash_md5.seen=700 processed=700 failed=0
+progress.hash_md5.seen=800 processed=800 failed=0
+progress.hash_md5.seen=900 processed=900 failed=0
+progress.hash_md5.seen=1000 processed=1000 failed=0
+progress.hash_md5.seen=1100 processed=1100 failed=0
+progress.hash_md5.seen=1200 processed=1200 failed=0
+progress.hash_md5.seen=1300 processed=1300 failed=0
+progress.hash_md5.seen=1400 processed=1400 failed=0
+progress.hash_md5.seen=1500 processed=1500 failed=0
+progress.hash_md5.seen=1600 processed=1600 failed=0
+progress.hash_md5.seen=1700 processed=1700 failed=0
+progress.hash_md5.seen=1800 processed=1800 failed=0
+progress.hash_md5.seen=1900 processed=1900 failed=0
+progress.hash_md5.seen=2000 processed=2000 failed=0
+progress.hash_md5.seen=2100 processed=2100 failed=0
+progress.hash_md5.seen=2200 processed=2200 failed=0
+progress.hash_md5.seen=2300 processed=2300 failed=0
+progress.hash_md5.seen=2400 processed=2400 failed=0
+progress.hash_md5.seen=2500 processed=2500 failed=0
+progress.hash_md5.seen=2600 processed=2600 failed=0
+progress.hash_md5.seen=2700 processed=2700 failed=0
+progress.hash_md5.seen=2800 processed=2800 failed=0
+progress.hash_md5.seen=2900 processed=2900 failed=0
+progress.hash_md5.seen=3000 processed=3000 failed=0
+progress.hash_md5.seen=3100 processed=3100 failed=0
+progress.hash_md5.seen=3200 processed=3200 failed=0
+progress.hash_md5.seen=3300 processed=3300 failed=0
+progress.hash_md5.seen=3400 processed=3400 failed=0
+progress.hash_md5.seen=3500 processed=3500 failed=0
+progress.hash_md5.seen=3600 processed=3600 failed=0
+progress.hash_md5.seen=3700 processed=3700 failed=0
+progress.hash_md5.seen=3800 processed=3800 failed=0
+progress.hash_md5.seen=3900 processed=3900 failed=0
+progress.hash_md5.seen=4000 processed=4000 failed=0
+progress.hash_md5.seen=4100 processed=4100 failed=0
+progress.hash_md5.seen=4200 processed=4200 failed=0
+progress.hash_md5.seen=4300 processed=4300 failed=0
+progress.hash_md5.seen=4400 processed=4400 failed=0
+progress.hash_md5.seen=4500 processed=4500 failed=0
+progress.hash_md5.seen=4600 processed=4600 failed=0
+progress.hash_md5.seen=4700 processed=4700 failed=0
+progress.hash_md5.seen=4800 processed=4800 failed=0
+progress.hash_md5.seen=4900 processed=4900 failed=0
+progress.hash_md5.seen=5000 processed=5000 failed=0
+progress.hash_md5.seen=5100 processed=5100 failed=0
+progress.hash_md5.seen=5200 processed=5200 failed=0
+progress.hash_md5.seen=5300 processed=5300 failed=0
+progress.hash_md5.seen=5400 processed=5400 failed=0
