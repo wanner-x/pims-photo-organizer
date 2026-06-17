@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+from contextlib import asynccontextmanager
 from collections.abc import Generator
 
 from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
@@ -19,7 +20,14 @@ from pims_v1.models.asset import Asset
 from pims_v1.services.log_service import latest_log_tail
 from pims_v1.services.progress_service import review_progress_summary
 
-app = FastAPI(title="PIMS V1")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    ensure_database_schema(engine)
+    yield
+
+
+app = FastAPI(title="PIMS V1", lifespan=lifespan)
 app.include_router(libraries_router)
 app.include_router(review_router)
 app.include_router(operations_router)
@@ -29,7 +37,6 @@ app.include_router(progress_router)
 
 
 def get_session() -> Generator[Session]:
-    ensure_database_schema(engine)
     session = SessionLocal()
     try:
         yield session

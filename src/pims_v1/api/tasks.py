@@ -3,14 +3,13 @@ from collections.abc import Generator
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from pims_v1.db import SessionLocal, ensure_database_schema, engine
+from pims_v1.db import SessionLocal
 from pims_v1.services.task_service import list_tasks, recover_stale_tasks
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 def get_session() -> Generator[Session]:
-    ensure_database_schema(engine)
     session = SessionLocal()
     try:
         yield session

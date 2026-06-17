@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from pims_v1.config import settings
-from pims_v1.db import SessionLocal, ensure_database_schema, engine
+from pims_v1.db import SessionLocal
 from pims_v1.services.operation_plan_service import (
     confirm_operation_batch,
     count_batch_operations,
@@ -18,7 +18,6 @@ router = APIRouter(prefix="/operations", tags=["operations"])
 
 
 def get_session() -> Generator[Session]:
-    ensure_database_schema(engine)
     session = SessionLocal()
     try:
         yield session

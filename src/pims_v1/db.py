@@ -23,6 +23,10 @@ def _configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
 
 
 def ensure_database_schema(bind=engine) -> None:
+    if str(bind.url).startswith("sqlite") and ":memory:" not in str(bind.url):
+        with bind.connect() as connection:
+            connection.exec_driver_sql("PRAGMA journal_mode=WAL")
+            connection.exec_driver_sql("PRAGMA synchronous=NORMAL")
     Base.metadata.create_all(bind=bind)
     with bind.begin() as connection:
         existing_series_suggestion_columns = {
