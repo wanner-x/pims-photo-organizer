@@ -12,3 +12,5 @@ __pycache__/
 data/.cache/
 data/.quarantine/
 data/
+# Local NAS audit / cleanup run artifacts (contain personal file paths)
+reports/
