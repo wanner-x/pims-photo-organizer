@@ -211,7 +211,7 @@ NAS\紧急企划\【紧急企划】-【VOL.001】-【樱樱樱可】-【JK黑】
 当前限制：
 
 - DeepSeek 当前文本 API 不可靠识别图片内容。
-- 当前本地视觉筛查是粗筛启发式，不等同于生产级 NSFW 模型。
+- [2026-07-17 更新] 本地粗筛已支持 NudeNet ONNX 后端：`PIMS_NSFW_BACKEND=onnx` 显式启用（默认仍 heuristic，行为不变）。模型 `data/models/nudenet_classifier_model.onnx`（79.7MB），下载脚本 `scripts/download_nsfw_model.py`，对照脚本 `scripts/compare_nsfw_backends.py`。20 样本对照显示 heuristic 在深色薄纱场景漏检、onnx 显著更敏感，启用后建议先人工复核一段时间再调阈值。
 - 云端复核和视频抽帧尚未接入。
 
 ### 9. 通知
@@ -223,8 +223,8 @@ NAS\紧急企划\【紧急企划】-【VOL.001】-【樱樱樱可】-【JK黑】
 
 当前状态：
 
-- 企微推送已关闭，原因是之前批次重复推送造成干扰。
-- 后续应在确认通知节流策略后再开启。
+- 企微推送保持关闭（.env 未配置 webhook）。
+- [2026-07-17 更新] 节流已实现，重新开启只差配置 webhook：同批次只推一次、已处理批次（status != planned）不再推、每小时最多 `PIMS_WECHAT_HOURLY_LIMIT` 次（默认 3，超限标记 throttled 下轮自动重试）、`PIMS_WECHAT_DIGEST=1` 时聚合为每日一条日报（`run_safe_workflow` 末尾触发）。新表 `notification_digest_entries`。
 
 ### 10. 安全与恢复
 
@@ -247,14 +247,14 @@ NAS\紧急企划\【紧急企划】-【VOL.001】-【樱樱樱可】-【JK黑】
 
 ### 1. 视觉内容识别仍需增强
 
-R18 标签字段、审核展示、本地启发式抽样筛查和自动归档阻断已实现，但还不是完整的生产级 NSFW 识别链路。
+R18 标签字段、审核展示、本地抽样筛查和自动归档阻断已实现，但还不是完整的生产级 NSFW 识别链路。
 
-建议方案：
+进展与剩余：
 
-- 本地 NSFW 模型替换当前启发式粗筛。
-- 云端 SafeSearch/Moderation API 只复核疑似项。
-- 视频抽帧纳入同一套抽样审核。
-- 审核页人工确认最终标签。
+- [已完成] 本地 NSFW 模型粗筛（NudeNet ONNX 后端，`services/nsfw_detector.py` 统一接口，默认 heuristic 可切换）。
+- [未做] 云端 SafeSearch/Moderation API 只复核疑似项。
+- [未做] 视频抽帧纳入同一套抽样审核（依赖 ffmpeg）。
+- 审核页人工确认最终标签（流程已支持）。
 
 ### 2. 审核页代码偏重
 
@@ -279,12 +279,7 @@ R18 标签字段、审核展示、本地启发式抽样筛查和自动归档阻�
 
 ### 4. 企微通知默认关闭
 
-需要重新设计通知节流：
-
-- 同一批次只推一次。
-- 已处理批次不再提醒。
-- 每小时最多 N 次。
-- 通知内容要包含审核入口和任务类型。
+[2026-07-17 已解决] 通知节流四条规则全部实现（见"9. 通知"），`notification_records.status` 生命周期扩展为 `sending→sent|failed|throttled|digest_pending→digested`。重新开启仅需配置 `PIMS_WECHAT_WEBHOOK_URL`。
 
 ### 5. NAS 操作必须继续谨慎
 
@@ -309,28 +304,23 @@ R18 标签字段、审核展示、本地启发式抽样筛查和自动归档阻�
 
 任务：
 
-- 新增目录名解析器。
-- 解析人物名、厂牌名、编号、主题、规格信息。
-- 输出 `archive_category`、`archive_title`、`metadata`、`confidence`。
-- 在审核页展示“规则建议”和“AI 建议”的差异。当前已展示规则建议，后续可加强差异高亮。
-- 对 `紧急企划`、`雪琪SAMA`、`IMISS爱蜜社` 写回归测试。
+- [已完成 2026-07-17] 目录名解析器 `services/dirname_parser.py`：person/studio/project/unknown 四类，五级模式优先级，解析人物/厂牌/编号/日期/主题/规格（P/V/MB 数值化）/R18，输出 `category_type`、`archive_category`、`archive_title`、`metadata`、`confidence`。
+- [已完成] 接入 `archive_rule_planner`：父目录非通用且置信度 >= 0.5 时采用解析结果，低于阈值维持原逻辑（留给 AI）。对外字段结构不变。
+- [已完成] 46 个新增测试（含 `紧急企划`、`雪琪SAMA`、`IMISS爱蜜社` 回归），全量 270 个测试通过。真实库抽样 200 条：studio 106 / person 71 / unknown 13 / project 10，平均置信度 0.756，94% 过阈值。
+- [遗留] 已知不能处理的模式见解析器测试文件头部注释：厂牌子系列名（丝享家/普惠集）误判人物、《书名号》粘连、无关键词后缀的裸厂牌名、韩日文人名括注、裸规格尾缀混入主题。
+- [后续] 审核页加强"规则建议 vs AI 建议"差异高亮。
 
 ### 阶段 2：R18 视觉识别
 
 推荐架构：
 
-- 每个文件夹抽样，不全量每张都调用云端。
-- 图片取封面、前中后若干张。
-- 视频抽关键帧。
-- 本地 NSFW 模型粗筛。
-- 中间置信度再调用云端复核。
-- 审核页人工确认是否追加 `[R18]`。
+- 每个文件夹抽样，不全量每张都调用云端。（已实现，沿用封面/前中后抽样）
+- [已完成 2026-07-17] 本地 NSFW 模型粗筛：NudeNet ONNX 分类器接入 `services/nsfw_detector.py` 统一接口，`PIMS_NSFW_BACKEND=onnx` 启用，手动 API / CLI / 工作流三条链路全部生效；onnxruntime 1.27（Python 3.14 有轮子），依赖组 `pip install -e .[nsfw]`。
+- [未做] 视频抽关键帧（依赖 ffmpeg）。
+- [未做] 中间置信度再调用云端复核。
+- 审核页人工确认是否追加 `[R18]`（流程已支持）。
 
-推荐模型路线：
-
-- 本地粗筛：NudeNet 或类似 ONNX NSFW detector。
-- 云端复核：Google Vision SafeSearch 或 AWS Rekognition moderation。
-- 大模型只用于少量疑难样本解释，不做全量扫描。
+云端复核候选（未接入）：Google Vision SafeSearch 或 AWS Rekognition moderation；大模型只用于少量疑难样本解释，不做全量扫描。
 
 ### 阶段 3：审核页可维护性改造
 
@@ -364,17 +354,14 @@ R18 标签字段、审核展示、本地启发式抽样筛查和自动归档阻�
 
 ### 阶段 5：通知恢复
 
-目标：
+[2026-07-17 全部完成] 节流四规则已实现并有 26 个新增测试背书：
 
-- 恢复企微推送，但不重复骚扰。
+- 同一批次只推一次（notification_records 唯一索引去重）。
+- 已处理批次（status != planned）永不重复推。
+- 每小时最多 `PIMS_WECHAT_HOURLY_LIMIT` 次（默认 3，0 关闭；超限标记 throttled，下轮工作流自动重试不丢失）。
+- 每日汇总：`PIMS_WECHAT_DIGEST=1` 时事件只入队，`run_safe_workflow` 末尾聚合为一条日报（每天最多一条）；CLI `notify-wechat` 生命周期消息共享同一小时预算。
 
-任务：
-
-- 重新启用 Webhook 前先加通知节流。
-- 通知内容按任务类型分类。
-- 同一批次只推一次。
-- 已处理批次永不重复推。
-- 支持每日汇总。
+恢复推送步骤：确认 `.env` 配置 `PIMS_WECHAT_WEBHOOK_URL`（可同时设 `PIMS_WECHAT_DIGEST=1` 起步），无需代码改动。
 
 ## 新对话接手提示词
 
@@ -432,4 +419,12 @@ pims run-safe-workflow --keep-root "\\192.168.31.10\personal_folder\网络写真
 
 ```powershell
 pims backup-db --label before-risky-change
+```
+
+NSFW 模型（可选，onnx 后端）：
+
+```powershell
+python scripts\download_nsfw_model.py          # 下载 NudeNet ONNX 模型到 data\models\
+python scripts\compare_nsfw_backends.py        # heuristic vs onnx 只读对照抽样
+# .env 设 PIMS_NSFW_BACKEND=onnx 启用（默认 heuristic）
 ```

@@ -1,0 +1,363 @@
+下面是 AI-First 版 V1 完整方案，重点是：第一版就接入人物识别、AI 评分、AI 分类、AI 系列归组，但不自动删除、不直接动原文件。
+
+PIMS V1：AI-First 影像整理系统方案
+
+1. V1 目标
+
+做一个本地优先的影像整理系统，用于管理：
+
+我的作品 网络摄影集 手机照片 电脑照片 硬盘/NAS导入目录 
+
+V1 就实现：
+
+扫描入库 时间线整理 人物识别 重复检测 相似图检测 AI标签 AI评分 AI系列归组 AI推荐整理路径 人工确认后执行移动 
+
+核心原则：
+
+AI强参与判断 人保留最终执行权 原始文件不删除 所有移动可回滚 
+
+2. V1 技术栈
+
+后端
+
+Python 3.11+ FastAPI SQLite APScheduler Pydantic 
+
+图像处理
+
+Pillow OpenCV imagehash exiftool ffmpeg / ffprobe 
+
+人物识别
+
+InsightFace + buffalo_l 
+
+用途：
+
+人脸检测 人脸向量 同一人聚类 人物封面 人物相册 
+
+AI 模型
+
+本地/视觉模型
+
+用于看图：
+
+Qwen2.5-VL MiniCPM-V 或者先接便宜视觉API 
+
+输出：
+
+人像/风景/静物 室内/户外 婚礼/Cos/街拍/写真 夜景/海边/城市/森林 质量问题 
+
+DeepSeek
+
+用于整理判断：
+
+系列命名 标签合并 整理路径建议 AI理由说明 作品描述 
+
+3. 目录配置
+
+用户手动指定库类型：
+
+libraries: - name: 我的作品 type: original path: D:/Photos/MyWorks - name: 网络摄影集 type: collection path: D:/Photos/Collections - name: 手机导入 type: import path: D:/Photos/PhoneImport 
+
+库类型：
+
+original：自己的作品 collection：网络摄影集 import：待整理导入区 
+
+4. V1 文件策略
+
+原始文件区
+
+原目录只读扫描：
+
+D:/Photos/PhoneImport/ D:/Photos/MyWorks/ D:/Photos/Collections/ 
+
+整理输出区
+
+人工确认后，移动到：
+
+D:/PIMS_Organized/ 
+
+结构：
+
+PIMS_Organized/ ├── 我的作品/ │ ├── 2026/ │ │ ├── 2026-06-07_深圳_Cos_女枪/ │ │ └── 2026-06-10_湖边_日落人像/ │ ├── 网络摄影集/ │ ├── 作者未知/ │ │ ├── 白裙海边写真/ │ │ └── 日系室内私房/ │ ├── 待确认/ ├── 重复候选/ └── 低质量候选/ 
+
+注意：
+
+不自动删除 不覆盖同名文件 移动前生成操作批次 支持撤销移动 
+
+5. V1 核心流程
+
+1. 扫描目录 2. 建立数据库索引 3. 生成缩略图 4. 提取 EXIF / 视频时间 5. 计算 MD5 6. 计算 pHash 7. InsightFace 人脸检测 8. 人物聚类 9. 视觉 AI 打标签 10. DeepSeek 汇总判断 11. 生成系列和整理建议 12. 进入待确认队列 13. 用户确认 14. 执行移动/重命名 15. 记录回滚日志 
+
+6. 数据库设计
+
+libraries
+
+id name type root_path status created_at updated_at 
+
+assets
+
+id library_id series_id original_path current_path file_name file_ext file_type file_size mtime hash_md5 hash_phash capture_time width height duration camera_make camera_model lens_model rating status created_at updated_at 
+
+status：
+
+normal duplicate_exact duplicate_similar low_quality_candidate ai_review moved offline 
+
+thumbnails
+
+id asset_id tiny_path grid_path preview_path blurhash created_at 
+
+缩略图不要放进 SQLite，放文件系统：
+
+.pims/cache/thumbs/ ├── ab/ │ └── cd/ │ └── abcdefxxxx_grid.webp 
+
+faces
+
+id asset_id person_id bbox embedding_path detection_score face_quality created_at 
+
+人脸 embedding 可先存：
+
+.pims/cache/embeddings/faces/ 
+
+后期再优化成向量索引。
+
+persons
+
+id name auto_name avatar_asset_id face_count confidence created_at updated_at 
+
+默认：
+
+Person_001 Person_002 Person_003 
+
+tags
+
+id name type 
+
+type：
+
+subject scene style event quality custom 
+
+asset_tags
+
+asset_id tag_id confidence source 
+
+source：
+
+vision_ai deepseek manual exif 
+
+series
+
+id library_id title type capture_date cover_asset_id description ai_confidence status created_at updated_at 
+
+type：
+
+shooting_project collection_series import_group 
+
+status：
+
+suggested confirmed manual 
+
+ai_analysis
+
+id asset_id series_id model_name analysis_json confidence created_at 
+
+operations
+
+id batch_id operation_type asset_id from_path to_path status created_at 
+
+用于回滚。
+
+7. AI 分析结构
+
+每张图的 AI 输出：
+
+{ "main_category": "人像", "sub_categories": ["Cos", "夜景", "户外"], "scene": ["城市", "霓虹", "夜景"], "style": ["暗调", "电影感"], "people_count": 1, "quality": { "score": 82, "sharpness": "good", "exposure": "normal", "composition": "good", "issues": [] }, "keep_level": "A", "action_suggestion": "keep", "confidence": 0.86 } 
+
+系列级 AI 输出：
+
+{ "series_title": "2026-06 深圳夜景 Cos 人像", "series_type": "shooting_project", "recommended_path": "我的作品/2026/2026-06-深圳夜景Cos人像/", "tags": ["Cos", "夜景", "城市", "人像"], "description": "一组以城市夜景和霓虹灯为背景的 Cos 人像作品。", "confidence": 0.82, "reason": "照片时间集中，人物一致，场景和服装风格统一。" } 
+
+8. 人物识别方案
+
+流程
+
+图片缩略图/预览图 ↓ InsightFace 检测人脸 ↓ 提取 512 维人脸向量 ↓ 按相似度聚类 ↓ 生成 PersonID ↓ 人工命名 
+
+聚类策略
+
+V1 简单可用：
+
+余弦相似度 >= 0.45~0.55 初步认为同一人 
+
+更稳：
+
+DBSCAN 聚类 
+
+聚类后页面展示：
+
+Person_001：438 张 Person_002：126 张 Person_003：52 张 
+
+用户可以：
+
+合并人物 拆分人物 重命名人物 设置头像 
+
+V1 至少实现：
+
+查看人物 重命名人物 按人物筛选图片 
+
+合并/拆分可以 V1.1 做。
+
+9. 系列归组规则
+
+我的作品 original
+
+优先级：
+
+文件夹 拍摄时间 同一人物 相似场景 EXIF设备 
+
+规则：
+
+同一目录 + 时间集中 = 同一拍摄项目 时间间隔超过 6 小时 = 可能拆分 同一人物 + 同一地点/场景 = 建议合并 
+
+网络摄影集 collection
+
+优先级：
+
+原文件夹 人物一致 画面风格一致 文件名连续 图片尺寸接近 
+
+规则：
+
+同一文件夹通常是一套图 相邻文件夹如果人物相同、风格相同，可建议合并 无EXIF时不强依赖时间 
+
+10. AI 评分等级
+
+S：精选候选 A：保留 B：普通归档 C：低质量候选 D：重复/废片候选 R：需要人工复核 
+
+评分来源：
+
+清晰度 曝光 构图 人脸质量 闭眼/糊脸 主体完整 重复程度 
+
+注意：
+
+D 级不删除，只进入低质量候选 
+
+11. 待确认页面
+
+V1 必须有这个页面。
+
+栏目：
+
+AI 推荐系列 AI 推荐移动路径 人物识别结果 重复候选 低质量候选 未确定分类 
+
+每条建议显示：
+
+缩略图 原路径 推荐路径 推荐理由 置信度 人物 标签 评分 
+
+操作按钮：
+
+确认 修改路径后确认 忽略 标记为精选 标记为低质量 
+
+12. Web 页面 V1
+
+最小页面：
+
+首页统计 扫描任务页 时间线 系列页 人物页 重复候选页 AI待确认页 设置页 
+
+首页示例：
+
+总资源：128,420 我的作品：56,210 网络摄影集：72,210 识别人脸：18,392 人物聚类：312 系列建议：1,284 重复候选：938 低质量候选：2,143 AI待确认：6,210 
+
+13. 性能策略
+
+增量扫描
+
+先判断：
+
+file_size + mtime 
+
+没变就跳过。
+
+变化后再做：
+
+MD5 EXIF 缩略图 AI分析 
+
+RAW 处理
+
+RAW 不全量解码。
+
+优先：
+
+提取内嵌 JPG 预览 
+
+支持：
+
+ARW CR3 NEF DNG RAF 
+
+视频处理
+
+V1 只做：
+
+ffprobe 提取时间/时长/编码 ffmpeg 截取中间帧做封面 
+
+14. AI 成本控制
+
+不要逐张让 DeepSeek 判断全部。
+
+推荐：
+
+每张图： 本地模型做人脸、pHash、基础标签 每个候选系列： 抽 3~8 张代表图 DeepSeek 生成标题、标签、整理建议 
+
+如果视觉模型用 API，则只分析：
+
+每组代表图 低置信度图片 精选候选 
+
+优先把大批量工作放本地。
+
+15. 安全机制
+
+必须做：
+
+原文件不删除 移动不覆盖 冲突自动加序号 所有操作写 operations 表 支持按 batch_id 回滚 低置信度不自动确认 
+
+移动命名规则：
+
+YYYYMMDD_HHMMSS_序号.后缀 
+
+如果没有时间：
+
+unknown_date_原文件名_序号.后缀 
+
+16. V1 开发顺序
+
+Milestone 1：基础索引
+
+配置文件 目录扫描 SQLite 建表 EXIF/mtime 时间提取 缩略图生成 Web 首页 
+
+Milestone 2：重复与相似
+
+MD5 完全重复 pHash 相似图 重复候选页面 
+
+Milestone 3：人物识别
+
+InsightFace 接入 人脸检测 人脸向量保存 人物聚类 人物页 
+
+Milestone 4：AI 分类评分
+
+视觉模型分析 标签入库 质量评分 DeepSeek 系列命名 AI待确认页面 
+
+Milestone 5：执行与回滚
+
+确认移动 批次记录 路径冲突处理 回滚功能 
+
+17. V1 不做什么
+
+为了别失控，V1 暂时不做：
+
+自动删除 复杂权限系统 多用户 移动端 App Tauri 桌面端 完整 Lightroom 修图流 云同步 商业化授权 
+
+18. 最终 V1 定义
+
+PIMS V1 是一个 AI-First、本地优先、安全可回滚的影像整理系统。它从第一版开始接入人物识别、AI分类、AI评分和系列命名，用 AI 提升整理决策力，但所有不可逆操作必须人工确认。
+
+我建议你让其它 AI 评估时重点看这几个点：
+
+InsightFace 聚类阈值设计 AI评分是否可靠 SQLite表结构是否需要补充 DeepSeek和视觉模型分工是否合理 V1功能是否过重 相似图和人物聚类是否应该并行处理 
