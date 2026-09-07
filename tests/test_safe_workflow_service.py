@@ -214,6 +214,87 @@ def test_run_safe_workflow_notifies_when_duplicate_plan_needs_approval(tmp_path,
     assert notifications[0]["operations"] == 1
 
 
+def test_run_safe_workflow_digest_mode_queues_batch_and_flushes_daily_summary(tmp_path, monkeypatch):
+    from PIL import Image
+
+    from pims_v1.models.notification import NotificationDigestEntry, NotificationRecord
+
+    sent_messages = []
+
+    def fake_send(webhook_url: str, content: str) -> dict:
+        sent_messages.append(content)
+        return {"errcode": 0}
+
+    monkeypatch.setattr(
+        "pims_v1.services.notification_service.send_wechat_text_message", fake_send
+    )
+    monkeypatch.setattr(
+        "pims_v1.services.safe_workflow_service.settings.wechat_webhook_url",
+        "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test",
+    )
+    monkeypatch.setattr("pims_v1.services.safe_workflow_service.settings.wechat_digest", True)
+
+    session = make_session(tmp_path)
+    local_root = tmp_path / "pc"
+    nas_root = tmp_path / "nas"
+    local_root.mkdir()
+    nas_root.mkdir()
+    local_file = local_root / "a.jpg"
+    nas_file = nas_root / "a.jpg"
+    Image.new("RGB", (16, 16), color="white").save(local_file)
+    nas_file.write_bytes(local_file.read_bytes())
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    session.add_all(
+        [
+            Asset(
+                library_id=library_row.id,
+                original_path=str(local_file),
+                current_path=str(local_file),
+                file_name="a.jpg",
+                file_ext=".jpg",
+                file_size=local_file.stat().st_size,
+                mtime=1.0,
+            ),
+            Asset(
+                library_id=library_row.id,
+                original_path=str(nas_file),
+                current_path=str(nas_file),
+                file_name="a.jpg",
+                file_ext=".jpg",
+                file_size=nas_file.stat().st_size,
+                mtime=1.0,
+            ),
+        ]
+    )
+    session.commit()
+
+    summary = run_safe_workflow(
+        session=session,
+        keep_root=str(nas_root),
+        cache_root=tmp_path / ".cache",
+        md5_limit=10,
+        phash_limit=10,
+        thumbnail_limit=10,
+        min_series_assets=1,
+    )
+
+    # The per-batch push was queued, not sent; the digest flush sent one summary.
+    assert summary["notification"] == {"sent": 0, "failed": 0, "skipped": 0, "queued": 1}
+    assert summary["wechat_digest"] == {"sent": 1, "failed": 0, "skipped": 0, "entries": 1}
+    assert len(sent_messages) == 1
+    assert "PIMS 每日汇总" in sent_messages[0]
+    assert f"批次 #{summary['duplicate_plan']['batch_id']}" in sent_messages[0]
+    assert session.query(NotificationDigestEntry).one().status == "sent"
+    digest_record = (
+        session.query(NotificationRecord)
+        .filter(NotificationRecord.event_type == "daily_digest")
+        .one()
+    )
+    assert digest_record.status == "sent"
+
+
 def test_run_safe_workflow_only_enqueues_images_for_phash(tmp_path):
     from PIL import Image
 
@@ -307,6 +388,175 @@ def test_run_safe_workflow_does_not_requeue_failed_phash_tasks(tmp_path):
     assert summary["phash_enqueued"]["queued"] == 0
     assert summary["phash"]["processed"] == 0
     assert session.query(ProcessingTask).filter(ProcessingTask.task_type == "hash_phash").count() == 1
+
+
+def test_run_safe_workflow_skips_removed_assets_when_enqueuing_phash(tmp_path):
+    from PIL import Image
+
+    session = make_session(tmp_path)
+    removed_path = tmp_path / "removed.jpg"
+    active_path = tmp_path / "active.jpg"
+    Image.new("RGB", (8, 8), color="white").save(active_path)
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    removed_asset = Asset(
+        library_id=library_row.id,
+        original_path=str(removed_path),
+        current_path=str(removed_path),
+        file_name="removed.jpg",
+        file_ext=".jpg",
+        file_size=1,
+        mtime=1.0,
+        status="deleted",
+    )
+    active_asset = Asset(
+        library_id=library_row.id,
+        original_path=str(active_path),
+        current_path=str(active_path),
+        file_name="active.jpg",
+        file_ext=".jpg",
+        file_size=active_path.stat().st_size,
+        mtime=1.0,
+    )
+    session.add_all([removed_asset, active_asset])
+    session.flush()
+    session.add(
+        ProcessingTask(
+            task_type="hash_phash",
+            subject_type="asset",
+            subject_id=removed_asset.id,
+            status="failed",
+            last_error="missing file",
+        )
+    )
+    session.commit()
+
+    summary = run_safe_workflow(
+        session=session,
+        keep_root=None,
+        cache_root=tmp_path / ".cache",
+        md5_limit=0,
+        phash_limit=1,
+        thumbnail_limit=0,
+        auto_archive_limit=0,
+    )
+
+    session.refresh(active_asset)
+    assert summary["phash_enqueued"]["queued"] == 1
+    assert summary["phash"]["processed"] == 1
+    assert active_asset.hash_phash is not None
+
+
+def test_run_safe_workflow_auto_quarantines_exact_duplicates_when_enabled(tmp_path):
+    from PIL import Image
+
+    session = make_session(tmp_path)
+    local_root = tmp_path / "pc"
+    nas_root = tmp_path / "nas"
+    local_root.mkdir()
+    nas_root.mkdir()
+    local_file = local_root / "a.jpg"
+    nas_file = nas_root / "a.jpg"
+    Image.new("RGB", (16, 16), color="white").save(nas_file)
+    local_file.write_bytes(nas_file.read_bytes())
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    session.add_all(
+        [
+            Asset(
+                library_id=library_row.id,
+                original_path=str(nas_file),
+                current_path=str(nas_file),
+                file_name="a.jpg",
+                file_ext=".jpg",
+                file_size=nas_file.stat().st_size,
+                mtime=1.0,
+            ),
+            Asset(
+                library_id=library_row.id,
+                original_path=str(local_file),
+                current_path=str(local_file),
+                file_name="a.jpg",
+                file_ext=".jpg",
+                file_size=local_file.stat().st_size,
+                mtime=1.0,
+            ),
+        ]
+    )
+    session.commit()
+
+    summary = run_safe_workflow(
+        session=session,
+        keep_root=str(nas_root),
+        cache_root=tmp_path / ".cache",
+        quarantine_root=tmp_path / ".quarantine",
+        md5_limit=10,
+        phash_limit=10,
+        thumbnail_limit=10,
+        min_series_assets=1,
+        auto_quarantine_limit=50,
+    )
+
+    assert summary["duplicate_plan"]["operations"] == 1
+    assert summary["auto_quarantine"]["executed"] == 1
+    assert not local_file.exists()
+    assert nas_file.exists()
+    assert session.query(Operation).filter(Operation.status == "executed").count() == 1
+
+
+def test_run_safe_workflow_does_not_auto_quarantine_by_default(tmp_path):
+    from PIL import Image
+
+    session = make_session(tmp_path)
+    local_root = tmp_path / "pc"
+    nas_root = tmp_path / "nas"
+    local_root.mkdir()
+    nas_root.mkdir()
+    local_file = local_root / "a.jpg"
+    nas_file = nas_root / "a.jpg"
+    Image.new("RGB", (16, 16), color="white").save(nas_file)
+    local_file.write_bytes(nas_file.read_bytes())
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    session.add_all(
+        [
+            Asset(
+                library_id=library_row.id,
+                original_path=str(nas_file),
+                current_path=str(nas_file),
+                file_name="a.jpg",
+                file_ext=".jpg",
+                file_size=nas_file.stat().st_size,
+                mtime=1.0,
+            ),
+            Asset(
+                library_id=library_row.id,
+                original_path=str(local_file),
+                current_path=str(local_file),
+                file_name="a.jpg",
+                file_ext=".jpg",
+                file_size=local_file.stat().st_size,
+                mtime=1.0,
+            ),
+        ]
+    )
+    session.commit()
+
+    summary = run_safe_workflow(
+        session=session,
+        keep_root=str(nas_root),
+        cache_root=tmp_path / ".cache",
+        md5_limit=10,
+        phash_limit=10,
+        thumbnail_limit=10,
+        min_series_assets=1,
+    )
+
+    assert summary["auto_quarantine"]["executed"] == 0
+    assert local_file.exists()
 
 
 def test_run_safe_workflow_skips_similar_reviews_by_default(tmp_path, monkeypatch):

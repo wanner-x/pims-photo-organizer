@@ -1,6 +1,10 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+import pims_v1
 
 from pims_v1.api.operations import get_session
 import pims_v1.api.progress as progress_api
@@ -112,21 +116,23 @@ def test_operations_api_executes_confirmed_batch(tmp_path):
         import pims_v1.api.operations as operations_api
 
         old_quarantine_root = operations_api.settings.quarantine_root
+        old_action = operations_api.settings.duplicate_action
         operations_api.settings.quarantine_root = str(quarantine_root)
+        operations_api.settings.duplicate_action = "quarantine"
         client = TestClient(app)
 
         response = client.post(f"/operations/batches/{batch_id}/execute")
     finally:
         operations_api.settings.quarantine_root = old_quarantine_root
+        operations_api.settings.duplicate_action = old_action
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.json() == {
-        "batch_id": batch_id,
-        "executed": 1,
-        "failed": 0,
-        "status": "executed",
-    }
+    body = response.json()
+    assert body["batch_id"] == batch_id
+    assert body["executed"] == 1
+    assert body["failed"] == 0
+    assert body["status"] == "executed"
     assert not source.exists()
     assert (quarantine_root / "a.jpg").exists()
 
@@ -201,6 +207,29 @@ def test_operations_api_excludes_planned_operation(tmp_path):
     assert response.json() == {"operation_id": operation_id, "status": "excluded"}
 
 
+REVIEW_STATIC_ROOT = Path(pims_v1.__file__).parent / "static"
+
+
+def review_ui_full_text(client: TestClient) -> str:
+    """返回 /review-ui 页面与其静态 CSS/JS 资源的合并文本。
+
+    审核页已拆分为 HTML 骨架 + /static/review/ 下的静态资源，
+    页面能力相关的断言需要针对合并后的整体文本进行。
+    同时验证每个静态资源都能通过 HTTP 200 获取。
+    """
+    response = client.get("/review-ui")
+    assert response.status_code == 200
+    parts = [response.text]
+    for asset in sorted(REVIEW_STATIC_ROOT.rglob("*")):
+        if not asset.is_file():
+            continue
+        asset_url = "/static/" + asset.relative_to(REVIEW_STATIC_ROOT).as_posix()
+        asset_response = client.get(asset_url)
+        assert asset_response.status_code == 200, asset_url
+        parts.append(asset_response.text)
+    return "\n".join(parts)
+
+
 def test_review_ui_page_exists():
     client = TestClient(app)
 
@@ -213,100 +242,95 @@ def test_review_ui_page_exists():
 def test_review_ui_batch_confirm_button_requires_actionable_planned_batch():
     client = TestClient(app)
 
-    response = client.get("/review-ui")
+    full_text = review_ui_full_text(client)
 
-    assert response.status_code == 200
-    assert "const selectedBatch = () => state.batches.find((batch) => batch.id === state.batchId);" in response.text
-    assert 'batch.status === "planned" && (batch.operation_count || 0) > 0' in response.text
-    assert "button.disabled = !canConfirm;" in response.text
-    assert "const batchConfirmBlocker = (batch) => {" in response.text
-    assert "explainSelectedBatchConfirmState();" in response.text
-    assert "请先选择一个包含操作的 planned 批次。" in response.text
-    assert "setStatus(blocker);" in response.text
-    assert '确认批次失败：${error.message}' in response.text
-    assert "待确认隔离批次" in response.text
-    assert "整理进度" in response.text
-    assert "已存在位置" in response.text
-    assert "重复位置" in response.text
-    assert "/ws/progress" in response.text
-    assert "preview-modal" in response.text
-    assert "openPreview" in response.text
-    assert "AI 系列整理审核" in response.text
-    assert "确认并移动到 NAS" in response.text
-    assert "批量生成 AI 建议" in response.text
-    assert "批量确认并移动" in response.text
-    assert "selectedSeriesIds" in response.text
-    assert "withButtonLoading" in response.text
-    assert "series-busy" in response.text
-    assert "aria-busy" in response.text
-    assert "首个错误" in response.text
-    assert "目标路径" in response.text
-    assert "content-tags" in response.text
-    assert "plan-summary" in response.text
-    assert "risk-flags" in response.text
-    assert "rule-plan" in response.text
-    assert "series-filter" in response.text
-    assert "needs_ai" in response.text
-    assert "target_conflict" in response.text
-    assert "审核功能导航" in response.text
-    assert "data-view-target=\"series\"" in response.text
-    assert "data-view-panel=\"duplicates\"" in response.text
-    assert "AI 系列整理" in response.text
-    assert "重复隔离审核" in response.text
+    assert "const selectedBatch = () => state.batches.find((batch) => batch.id === state.batchId);" in full_text
+    assert 'batch.status === "planned" && (batch.operation_count || 0) > 0' in full_text
+    assert "button.disabled = !canConfirm;" in full_text
+    assert "const batchConfirmBlocker = (batch) => {" in full_text
+    assert "explainSelectedBatchConfirmState();" in full_text
+    assert "请先选择一个包含操作的 planned 批次。" in full_text
+    assert "setStatus(blocker);" in full_text
+    assert '确认批次失败：${error.message}' in full_text
+    assert "待确认隔离批次" in full_text
+    assert "整理进度" in full_text
+    assert "已存在位置" in full_text
+    assert "重复位置" in full_text
+    assert "/ws/progress" in full_text
+    assert "preview-modal" in full_text
+    assert "openPreview" in full_text
+    assert "AI 系列整理审核" in full_text
+    assert "确认并移动到 NAS" in full_text
+    assert "批量生成 AI 建议" in full_text
+    assert "批量确认并移动" in full_text
+    assert "selectedSeriesIds" in full_text
+    assert "withButtonLoading" in full_text
+    assert "series-busy" in full_text
+    assert "aria-busy" in full_text
+    assert "首个错误" in full_text
+    assert "目标路径" in full_text
+    assert "content-tags" in full_text
+    assert "plan-summary" in full_text
+    assert "risk-flags" in full_text
+    assert "rule-plan" in full_text
+    assert "series-filter" in full_text
+    assert "needs_ai" in full_text
+    assert "target_conflict" in full_text
+    assert "审核功能导航" in full_text
+    assert "data-view-target=\"series\"" in full_text
+    assert "data-view-panel=\"duplicates\"" in full_text
+    assert "AI 系列整理" in full_text
+    assert "重复隔离审核" in full_text
 
 
 def test_review_ui_inline_video_preview_does_not_show_player_controls():
     client = TestClient(app)
 
-    response = client.get("/review-ui")
+    full_text = review_ui_full_text(client)
 
-    assert response.status_code == 200
-    assert "video.muted = true;" in response.text
-    assert "video.playsInline = true;" in response.text
-    assert "video.pause();" in response.text
+    assert "video.muted = true;" in full_text
+    assert "video.playsInline = true;" in full_text
+    assert "video.pause();" in full_text
 
 
 def test_review_ui_handles_progress_socket_error_payload():
     client = TestClient(app)
 
-    response = client.get("/review-ui")
+    full_text = review_ui_full_text(client)
 
-    assert response.status_code == 200
-    assert 'payload.type === "error"' in response.text
-    assert "payload.message" in response.text
+    assert 'payload.type === "error"' in full_text
+    assert "payload.message" in full_text
 
 
 def test_review_ui_includes_mobile_adaptation_rules():
     client = TestClient(app)
 
-    response = client.get("/review-ui")
+    full_text = review_ui_full_text(client)
 
-    assert response.status_code == 200
-    assert "@media (max-width: 720px)" in response.text
-    assert "position: sticky" in response.text
-    assert "top: 74px" in response.text
-    assert "bottom: 12px" not in response.text
-    assert "grid-template-columns: 1fr" in response.text
-    assert "overflow-x: hidden" in response.text
+    assert "@media (max-width: 720px)" in full_text
+    assert "position: sticky" in full_text
+    assert "top: 74px" in full_text
+    assert "bottom: 12px" not in full_text
+    assert "grid-template-columns: 1fr" in full_text
+    assert "overflow-x: hidden" in full_text
 
 
 def test_review_ui_includes_archive_anomaly_and_ledger_views():
     client = TestClient(app)
 
-    response = client.get("/review-ui")
+    full_text = review_ui_full_text(client)
 
-    assert response.status_code == 200
-    assert 'data-view-target="archive"' in response.text
-    assert 'data-view-target="sampling"' in response.text
-    assert 'data-view-target="anomalies"' in response.text
-    assert 'data-view-target="ledger"' in response.text
-    assert "loadArchiveOverview" in response.text
-    assert "loadArchiveSampling" in response.text
-    assert "loadArchiveAnomalies" in response.text
-    assert "loadArchiveLedger" in response.text
-    assert "rollbackExecution" in response.text
-    assert "scan-r18" in response.text
-    assert "moderation-provider" in response.text
+    assert 'data-view-target="archive"' in full_text
+    assert 'data-view-target="sampling"' in full_text
+    assert 'data-view-target="anomalies"' in full_text
+    assert 'data-view-target="ledger"' in full_text
+    assert "loadArchiveOverview" in full_text
+    assert "loadArchiveSampling" in full_text
+    assert "loadArchiveAnomalies" in full_text
+    assert "loadArchiveLedger" in full_text
+    assert "rollbackExecution" in full_text
+    assert "scan-r18" in full_text
+    assert "moderation-provider" in full_text
 
 
 def test_operations_api_lists_batch_operations_with_asset_payload(tmp_path):
@@ -733,9 +757,11 @@ def test_review_series_suggest_ai_api_creates_pending_suggestion(tmp_path, monke
     candidate_id = candidate.id
     session.close()
 
+    client_kwargs = {}
+
     class FakeClient:
         def __init__(self, **kwargs) -> None:
-            pass
+            client_kwargs.update(kwargs)
 
         def chat(self, messages):
             return (
@@ -762,6 +788,7 @@ def test_review_series_suggest_ai_api_creates_pending_suggestion(tmp_path, monke
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    assert client_kwargs["max_tokens"] == 600
     assert response.json()["title"] == "清晨写真 [R18]"
     assert response.json()["archive_path"].endswith("写真合集\\清晨写真 [R18]") or response.json()["archive_path"].endswith("写真合集/清晨写真 [R18]")
     assert response.json()["plan_summary"] == "移动到 NAS 归档目录"

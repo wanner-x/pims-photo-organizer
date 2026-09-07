@@ -11,8 +11,14 @@ from pims_v1.models.review import ReviewItem
 from pims_v1.services.ai_naming_service import NamingClient, suggest_series_organization_candidates
 from pims_v1.services.archive_decision_service import auto_archive_candidates
 from pims_v1.services.duplicate_index_service import build_exact_duplicate_reviews
-from pims_v1.services.notification_service import notify_duplicate_approval_needed
-from pims_v1.services.operation_plan_service import create_duplicate_quarantine_plan
+from pims_v1.services.notification_service import (
+    notify_duplicate_approval_needed,
+    send_wechat_daily_digest,
+)
+from pims_v1.services.operation_plan_service import (
+    auto_quarantine_exact_duplicates,
+    create_duplicate_quarantine_plan,
+)
 from pims_v1.services.phash_index_service import IMAGE_SUFFIXES
 from pims_v1.services.series_moderation_service import review_series_r18_candidates
 from pims_v1.services.series_index_service import build_series_candidates
@@ -24,6 +30,7 @@ from pims_v1.services.visual_moderation_service import VisualModerationClient, b
 
 
 ProgressCallback = Callable[[dict[str, int | str]], None]
+PROCESSABLE_ASSET_STATUSES = ("normal", "archived")
 
 
 def _empty_archive_auto_summary() -> dict[str, int]:
@@ -100,7 +107,13 @@ def _existing_task_subject_ids(session: Session, task_type: str, asset_ids: list
 
 
 def _enqueue_hash_tasks(session: Session, task_type: str, hash_column, limit: int) -> int:
-    query = session.query(Asset).filter(hash_column.is_(None)).order_by(Asset.id).limit(limit)
+    query = (
+        session.query(Asset)
+        .filter(hash_column.is_(None))
+        .filter(Asset.status.in_(PROCESSABLE_ASSET_STATUSES))
+        .order_by(Asset.id)
+        .limit(limit)
+    )
     assets = query.all()
     existing_subject_ids = _existing_task_subject_ids(session, task_type, [asset.id for asset in assets])
     tasks = [
@@ -122,6 +135,7 @@ def _enqueue_phash_tasks(session: Session, limit: int) -> int:
         session.query(Asset)
         .filter(Asset.hash_phash.is_(None))
         .filter(Asset.file_ext.in_(sorted(IMAGE_SUFFIXES)))
+        .filter(Asset.status.in_(PROCESSABLE_ASSET_STATUSES))
         .order_by(Asset.id)
         .limit(limit)
     )
@@ -141,7 +155,25 @@ def _enqueue_phash_tasks(session: Session, limit: int) -> int:
     return len(tasks)
 
 
-def _build_thumbnails(session: Session, cache_root: str | Path, limit: int) -> dict[str, int]:
+def _existing_thumbnail_ids(cache_root: str | Path) -> set[int]:
+    thumbnail_dir = Path(cache_root) / "thumbnails"
+    if not thumbnail_dir.is_dir():
+        return set()
+    ids: set[int] = set()
+    for entry in thumbnail_dir.glob("*.jpg"):
+        try:
+            ids.add(int(entry.stem))
+        except ValueError:
+            continue
+    return ids
+
+
+def build_pending_thumbnails(
+    *,
+    session: Session,
+    cache_root: str | Path,
+    limit: int,
+) -> dict[str, int]:
     summary = {
         "created": 0,
         "exists": 0,
@@ -149,12 +181,27 @@ def _build_thumbnails(session: Session, cache_root: str | Path, limit: int) -> d
         "missing": 0,
         "failed": 0,
     }
-    assets = session.query(Asset).order_by(Asset.id).limit(limit).all()
-    for asset in assets:
+    if limit <= 0:
+        return summary
+
+    existing_ids = _existing_thumbnail_ids(cache_root)
+    query = (
+        session.query(Asset)
+        .filter(Asset.file_ext.in_(sorted(IMAGE_SUFFIXES)))
+        .filter(Asset.status.in_(PROCESSABLE_ASSET_STATUSES))
+        .order_by(Asset.id)
+    )
+    attempted = 0
+    for asset in query.yield_per(500):
+        if asset.id in existing_ids:
+            continue
         result = ensure_thumbnail(session=session, asset_id=asset.id, cache_root=cache_root)
         status = str(result["status"])
         if status in summary:
             summary[status] += 1
+        attempted += 1
+        if attempted >= limit:
+            break
     return summary
 
 
@@ -178,6 +225,7 @@ def run_safe_workflow(
     session: Session,
     keep_root: str | None,
     cache_root: str | Path,
+    quarantine_root: str | Path | None = None,
     md5_limit: int = 1000,
     phash_limit: int = 1000,
     thumbnail_limit: int = 1000,
@@ -186,6 +234,7 @@ def run_safe_workflow(
     ai_suggest_limit: int = 0,
     r18_scan_limit: int = 0,
     auto_archive_limit: int = 20,
+    auto_quarantine_limit: int = 0,
     similar_limit: int = 0,
     similar_threshold: int = 6,
     stale_after_seconds: int = 300,
@@ -207,6 +256,7 @@ def run_safe_workflow(
     phash = process_phash_tasks(
         session=session,
         limit=phash_limit,
+        concurrency=settings.phash_concurrency,
         progress_callback=progress_callback,
     )
     similar = _empty_similar_summary()
@@ -223,7 +273,9 @@ def run_safe_workflow(
             min_assets=min_series_assets,
             limit=series_limit,
         )
-    thumbnails = _build_thumbnails(session=session, cache_root=cache_root, limit=thumbnail_limit)
+    thumbnails = build_pending_thumbnails(
+        session=session, cache_root=cache_root, limit=thumbnail_limit
+    )
     ai_suggest = _empty_ai_suggest_summary()
     if keep_root and ai_suggest_limit > 0 and archive_client is not None:
         ai_suggest = suggest_series_organization_candidates(
@@ -256,7 +308,40 @@ def run_safe_workflow(
     duplicate_plan = {"batch_id": 0, "operations": 0}
     if keep_root:
         duplicate_plan = create_duplicate_quarantine_plan(session=session, keep_root=keep_root)
-    notification = _notify_duplicate_plan_if_needed(session, duplicate_plan)
+
+    auto_quarantine = {
+        "considered": 0,
+        "executed": 0,
+        "failed": 0,
+        "held_no_keep_copy": 0,
+        "skipped_missing_source": 0,
+    }
+    if keep_root and auto_quarantine_limit > 0:
+        effective_quarantine_root = quarantine_root or settings.quarantine_root
+        auto_quarantine = auto_quarantine_exact_duplicates(
+            session=session,
+            keep_root=keep_root,
+            quarantine_root=effective_quarantine_root,
+            limit=auto_quarantine_limit,
+            action=settings.duplicate_action,
+        )
+
+    # Only ask a human to approve duplicates that auto-approval could not safely
+    # handle on its own, so notifications shrink as automation does more work.
+    remaining_for_review = duplicate_plan.get("operations", 0) - auto_quarantine["executed"]
+    notification_plan = dict(duplicate_plan)
+    notification_plan["operations"] = max(0, remaining_for_review)
+    notification = _notify_duplicate_plan_if_needed(session, notification_plan)
+
+    # Digest mode queues per-batch events instead of sending them; flush the
+    # queue as a single daily summary at the end of the workflow round.
+    wechat_digest = {"sent": 0, "failed": 0, "skipped": 1, "entries": 0}
+    if settings.wechat_webhook_url and settings.wechat_digest:
+        wechat_digest = send_wechat_daily_digest(
+            session=session,
+            webhook_url=settings.wechat_webhook_url,
+            review_url=settings.review_url,
+        )
 
     return {
         "recovered": recovered,
@@ -272,5 +357,7 @@ def run_safe_workflow(
         "r18_scan": r18_scan,
         "archive_auto": archive_auto,
         "duplicate_plan": duplicate_plan,
+        "auto_quarantine": auto_quarantine,
         "notification": notification,
+        "wechat_digest": wechat_digest,
     }

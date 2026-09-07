@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from pims_v1.config import settings
 from pims_v1.models.archive_decision import (
     ArchiveExecutionRecord,
     ArchivePlanningRecord,
@@ -70,6 +71,7 @@ def merge_archive_plans(
     rule_plan: dict[str, object],
     ai_plan: dict[str, object],
     moderation_summary: dict[str, object] | None = None,
+    ai_auto_apply_min_confidence: float = 0.85,
 ) -> dict[str, object]:
     rule_score = float(rule_plan.get("confidence", 0.0))
     ai_score = float(ai_plan.get("confidence", 0.0))
@@ -104,6 +106,13 @@ def merge_archive_plans(
         final_category = str(rule_plan["category"])
         final_title = str(rule_plan["title"])
         risk_flags.add("sample_review_recommended")
+    elif ai_score >= ai_auto_apply_min_confidence:
+        # No risk flags and the AI planner is highly confident: trust the AI's
+        # naming/category even when the rule planner disagrees, so confident AI
+        # decisions no longer require manual review.
+        decision_type = "auto_apply"
+        final_category = str(ai_plan.get("category") or rule_plan.get("category") or "未分类")
+        final_title = str(ai_plan.get("title") or rule_plan.get("title") or "Untitled Series")
     else:
         decision_type = "manual_review"
         final_category = str(rule_plan.get("category") or ai_plan.get("category") or "未分类")
@@ -423,6 +432,7 @@ def auto_archive_candidate(
         rule_plan=rule_plan,
         ai_plan=ai_plan,
         moderation_summary=moderation_summary,
+        ai_auto_apply_min_confidence=settings.ai_auto_apply_min_confidence,
     )
     planning_record = _persist_planning_record(
         session=session,

@@ -21,7 +21,12 @@ def test_deepseek_client_sends_chat_request_and_returns_content():
                             "content": "海边白裙写真",
                         }
                     }
-                ]
+                ],
+                "usage": {
+                    "prompt_tokens": 120,
+                    "completion_tokens": 80,
+                    "total_tokens": 200,
+                },
             },
         )
 
@@ -31,6 +36,7 @@ def test_deepseek_client_sends_chat_request_and_returns_content():
         model="deepseek-v4-pro",
         thinking_enabled=True,
         reasoning_effort="high",
+        max_tokens=600,
         transport=httpx.MockTransport(handler),
     )
 
@@ -43,7 +49,42 @@ def test_deepseek_client_sends_chat_request_and_returns_content():
     assert payload["model"] == "deepseek-v4-pro"
     assert payload["reasoning_effort"] == "high"
     assert payload["thinking"] == {"type": "enabled"}
+    assert payload["max_tokens"] == 600
     assert "temperature" not in payload
+    assert client.last_usage == {
+        "prompt_tokens": 120,
+        "completion_tokens": 80,
+        "total_tokens": 200,
+    }
+
+
+def test_deepseek_client_uses_low_cost_non_thinking_payload():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.read().decode("utf-8"))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "{}"}}]},
+        )
+
+    client = DeepSeekClient(
+        api_key="secret",
+        model="deepseek-v4-flash",
+        thinking_enabled=False,
+        max_tokens=600,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert client.chat([{"role": "user", "content": "organize"}]) == "{}"
+    assert captured["payload"] == {
+        "model": "deepseek-v4-flash",
+        "messages": [{"role": "user", "content": "organize"}],
+        "max_tokens": 600,
+        "temperature": 0.2,
+        "thinking": {"type": "disabled"},
+    }
+    assert client.last_usage == {}
 
 
 def test_deepseek_client_requires_api_key():

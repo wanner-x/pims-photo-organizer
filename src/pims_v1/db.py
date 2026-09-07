@@ -72,6 +72,15 @@ def ensure_database_schema(bind=engine) -> None:
             ON series_moderation_runs (candidate_id, created_at)
             """
         )
+        # Speeds up the workflow's repeated "image assets still missing a hash"
+        # and thumbnail-candidate scans, which filter on file_ext every round.
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_assets_file_ext ON assets (file_ext)"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_processing_tasks_type_status_id "
+            "ON processing_tasks (task_type, status, id)"
+        )
 
 
 __all__ = ["Base", "SessionLocal", "engine", "ensure_database_schema"]

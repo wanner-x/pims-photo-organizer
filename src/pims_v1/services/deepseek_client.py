@@ -10,6 +10,7 @@ class DeepSeekClient:
         model: str = "deepseek-v4-pro",
         reasoning_effort: str = "high",
         thinking_enabled: bool = True,
+        max_tokens: int = 600,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         if not api_key:
@@ -19,18 +20,22 @@ class DeepSeekClient:
         self.model = model
         self.reasoning_effort = reasoning_effort
         self.thinking_enabled = thinking_enabled
+        self.max_tokens = max_tokens
         self.transport = transport
+        self.last_usage: dict[str, object] = {}
 
     def chat(self, messages: list[dict[str, str]]) -> str:
         payload = {
             "model": self.model,
             "messages": messages,
+            "max_tokens": self.max_tokens,
         }
         if self.thinking_enabled:
             payload["reasoning_effort"] = self.reasoning_effort
             payload["thinking"] = {"type": "enabled"}
         else:
             payload["temperature"] = 0.2
+            payload["thinking"] = {"type": "disabled"}
         with httpx.Client(transport=self.transport, timeout=60.0) as client:
             response = client.post(
                 f"{self.base_url}/chat/completions",
@@ -42,4 +47,5 @@ class DeepSeekClient:
             )
             response.raise_for_status()
         payload = response.json()
+        self.last_usage = dict(payload.get("usage") or {})
         return str(payload["choices"][0]["message"]["content"]).strip()

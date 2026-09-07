@@ -1,11 +1,28 @@
+"""Moderation-client facade over the pluggable NSFW detector backends.
+
+The R18 scan chain (manual API, CLI, workflow) talks to a
+``VisualModerationClient`` with a per-image ``moderate_image`` call. Detection
+itself now lives in ``pims_v1.services.nsfw_detector`` behind a unified
+batch interface; this module adapts detectors to the legacy client protocol.
+
+Backend selection: an explicit ``PIMS_R18_PROVIDER`` (``heuristic``/``onnx``)
+wins; when it is ``auto`` (the default), ``PIMS_NSFW_BACKEND`` decides and
+defaults to ``heuristic``, so behaviour is unchanged unless the ONNX backend
+is explicitly enabled.
+"""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Protocol
 
-from PIL import Image
+from pims_v1.services.nsfw_detector import (
+    HeuristicNsfwDetector,
+    NsfwDetector,
+    build_nsfw_detector,
+    detection_to_moderation_result,
+    resolve_nsfw_backend_name,
+)
 
-from pims_v1.services.image_open_service import ImageProcessingError, safe_image_open
 
 class VisualModerationClient(Protocol):
     provider_name: str
@@ -14,56 +31,26 @@ class VisualModerationClient(Protocol):
         ...
 
 
-class HeuristicVisualModerationClient:
-    provider_name = "heuristic"
+class DetectorVisualModerationClient:
+    """Adapts any NsfwDetector to the VisualModerationClient protocol."""
+
+    def __init__(self, detector: NsfwDetector) -> None:
+        self.detector = detector
+        self.provider_name = detector.backend_name
 
     def moderate_image(self, path: Path) -> dict[str, object]:
-        try:
-            with safe_image_open(path) as image:
-                rgb = image.convert("RGB")
-                score = _estimate_skin_ratio_score(rgb)
-        except ImageProcessingError as exc:
-            return {
-                "label": "error",
-                "score": 0.0,
-                "reason": str(exc),
-                "provider": self.provider_name,
-            }
-        return {
-            "label": "nsfw_suspected" if score >= 0.55 else "safe",
-            "score": score,
-            "reason": f"skin_ratio={score:.3f}",
-            "provider": self.provider_name,
-        }
+        return detection_to_moderation_result(self.detector.detect([path])[0])
+
+
+class HeuristicVisualModerationClient(DetectorVisualModerationClient):
+    """Skin-ratio heuristic client (previous default), same behaviour."""
+
+    def __init__(self) -> None:
+        super().__init__(HeuristicNsfwDetector())
 
 
 def build_visual_moderation_client(provider_name: str = "auto") -> VisualModerationClient:
-    normalized = provider_name.strip().lower()
-    if normalized in {"", "auto", "heuristic"}:
+    backend_name = resolve_nsfw_backend_name(provider_name)
+    if backend_name == "heuristic":
         return HeuristicVisualModerationClient()
-    raise ValueError(f"Unsupported visual moderation provider: {provider_name}")
-
-
-def _estimate_skin_ratio_score(image: Image.Image) -> float:
-    width, height = image.size
-    if width == 0 or height == 0:
-        return 0.0
-    skin_pixels = 0
-    total_pixels = width * height
-    pixels = image.load()
-    for x in range(width):
-        for y in range(height):
-            red, green, blue = pixels[x, y]
-            maximum = max(red, green, blue)
-            minimum = min(red, green, blue)
-            if (
-                red > 95
-                and green > 40
-                and blue > 20
-                and (maximum - minimum) > 15
-                and abs(red - green) > 15
-                and red > green
-                and red > blue
-            ):
-                skin_pixels += 1
-    return skin_pixels / total_pixels
+    return DetectorVisualModerationClient(build_nsfw_detector(backend_name))

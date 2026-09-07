@@ -8,6 +8,11 @@ from pims_v1.services.image_open_service import ImageProcessingError, safe_image
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
 
+# Perceptual hashing only needs a small image (phash downsizes to 32x32 before
+# the DCT), so decoding JPEGs at a reduced draft resolution keeps the result
+# stable while avoiding full-resolution decodes of very large photos.
+PHASH_PRESCALE = (256, 256)
+
 
 def compute_missing_phash(*, session: Session, limit: int | None = None) -> dict[str, int]:
     summary = {"processed": 0, "skipped_missing": 0, "skipped_non_image": 0, "failed": 0}
@@ -24,7 +29,7 @@ def compute_missing_phash(*, session: Session, limit: int | None = None) -> dict
             summary["skipped_missing"] += 1
             continue
         try:
-            with safe_image_open(path) as image:
+            with safe_image_open(path, prescale=PHASH_PRESCALE) as image:
                 asset.hash_phash = str(imagehash.phash(image))
         except ImageProcessingError:
             summary["failed"] += 1

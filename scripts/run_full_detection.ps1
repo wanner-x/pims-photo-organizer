@@ -7,11 +7,14 @@ param(
     [int]$AiSuggestLimit = 50,
     [int]$R18ScanLimit = 50,
     [int]$AutoArchiveLimit = 20,
+    [int]$AutoQuarantineLimit = 500,
     [int]$SimilarLimit = 0,
     [int]$SeriesLimit = 0,
     [int]$BackupEveryRounds = 5,
+    [int]$BackupRetention = 8,
+    [int]$ExecuteBatchLimit = 20000,
     [int]$SleepSeconds = 5,
-    [switch]$ExecuteConfirmedBatches
+    [int]$ExecuteConfirmedBatches = 1
 )
 
 $ErrorActionPreference = "Stop"
@@ -96,6 +99,30 @@ finally:
     return $json | ConvertFrom-Json
 }
 
+function Remove-OldBackups {
+    param([int]$Keep)
+    if ($Keep -le 0) {
+        return
+    }
+    $backupDir = Join-Path $RepoRoot "data\backups"
+    if (-not (Test-Path $backupDir)) {
+        return
+    }
+    $backups = Get-ChildItem -Path $backupDir -Filter "*.db" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+    if ($backups.Count -le $Keep) {
+        return
+    }
+    $backups | Select-Object -Skip $Keep | ForEach-Object {
+        try {
+            Remove-Item $_.FullName -Force -ErrorAction Stop
+            Write-RunLog "Pruned old backup: $($_.Name)"
+        } catch {
+            Write-RunLog "WARN failed to prune backup $($_.Name): $($_.Exception.Message)"
+        }
+    }
+}
+
 function Invoke-ConfirmedBatches {
     $lines = & $Python -m pims_v1.cli list-batches
     if ($LASTEXITCODE -ne 0) {
@@ -112,8 +139,9 @@ function Invoke-ConfirmedBatches {
     }
 
     Invoke-Pims @("backup-db", "--label", "before-auto-execute-$RunStamp")
+    Remove-OldBackups -Keep $BackupRetention
     foreach ($batchId in $confirmedBatchIds) {
-        Invoke-Pims @("execute-batch", "$batchId")
+        Invoke-Pims @("execute-batch", "$batchId", "--limit", "$ExecuteBatchLimit")
     }
 }
 
@@ -124,9 +152,9 @@ Invoke-WechatNotify -Title "PIMS full detection started" -Lines @(
     "ai_suggest_limit=$AiSuggestLimit r18_scan_limit=$R18ScanLimit auto_archive_limit=$AutoArchiveLimit"
 )
 if ([string]::IsNullOrWhiteSpace($KeepRoot)) {
-    Write-RunLog "KeepRoot=.env Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit AiSuggestLimit=$AiSuggestLimit R18ScanLimit=$R18ScanLimit AutoArchiveLimit=$AutoArchiveLimit SimilarLimit=$SimilarLimit SeriesLimit=$SeriesLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
+    Write-RunLog "KeepRoot=.env Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit AiSuggestLimit=$AiSuggestLimit R18ScanLimit=$R18ScanLimit AutoArchiveLimit=$AutoArchiveLimit AutoQuarantineLimit=$AutoQuarantineLimit SimilarLimit=$SimilarLimit SeriesLimit=$SeriesLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
 } else {
-    Write-RunLog "KeepRoot=$KeepRoot Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit AiSuggestLimit=$AiSuggestLimit R18ScanLimit=$R18ScanLimit AutoArchiveLimit=$AutoArchiveLimit SimilarLimit=$SimilarLimit SeriesLimit=$SeriesLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
+    Write-RunLog "KeepRoot=$KeepRoot Md5Limit=$Md5Limit PhashLimit=$PhashLimit ThumbnailLimit=$ThumbnailLimit AiSuggestLimit=$AiSuggestLimit R18ScanLimit=$R18ScanLimit AutoArchiveLimit=$AutoArchiveLimit AutoQuarantineLimit=$AutoQuarantineLimit SimilarLimit=$SimilarLimit SeriesLimit=$SeriesLimit ExecuteConfirmedBatches=$ExecuteConfirmedBatches"
 }
 
 $round = 0
@@ -136,12 +164,13 @@ try {
         $round += 1
         Write-RunLog "===== Round $round started ====="
         try {
-            if ($ExecuteConfirmedBatches) {
+            if ($ExecuteConfirmedBatches -ne 0) {
                 Invoke-ConfirmedBatches
             }
 
             if ($round -eq 1 -or (($round - 1) % $BackupEveryRounds) -eq 0) {
                 Invoke-Pims @("backup-db", "--label", "full-detection-round-$round-$RunStamp")
+                Remove-OldBackups -Keep $BackupRetention
             }
 
             $workflowArgs = @(
@@ -152,6 +181,7 @@ try {
                 "--ai-suggest-limit", "$AiSuggestLimit",
                 "--r18-scan-limit", "$R18ScanLimit",
                 "--auto-archive-limit", "$AutoArchiveLimit",
+                "--auto-quarantine-limit", "$AutoQuarantineLimit",
                 "--similar-limit", "$SimilarLimit",
                 "--series-limit", "$SeriesLimit",
                 "--min-series-assets", "2"

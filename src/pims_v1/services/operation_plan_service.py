@@ -7,7 +7,20 @@ from pims_v1.models.asset import Asset
 from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
 from pims_v1.models.operation import Operation, OperationBatch
-from pims_v1.services.delete_service import move_to_quarantine
+from pims_v1.services.delete_service import delete_file, move_to_quarantine
+
+
+def _perform_file_removal(source: Path, quarantine_root: str | Path, action: str) -> str:
+    """Remove one redundant duplicate copy and return the resulting ``to_path``.
+
+    ``action="delete"`` removes the file permanently (no quarantine backup),
+    ``action="quarantine"`` (default) moves it into the reversible quarantine root.
+    """
+    if action == "delete":
+        delete_file(source)
+        return ""
+    destination = move_to_quarantine(source, Path(quarantine_root))
+    return str(destination)
 
 
 def _normalize_windows_path(path: str) -> str:
@@ -35,6 +48,18 @@ def _choose_keep_asset(assets: list[Asset], keep_root: str) -> Asset:
 
 def create_duplicate_quarantine_plan(session: Session, keep_root: str) -> dict[str, int]:
     planned_operations = []
+    # Load all assets that already have an active quarantine operation once, so the
+    # per-group loop avoids an N+1 existence query per duplicate copy.
+    assets_with_active_operation = {
+        row[0]
+        for row in session.query(Operation.asset_id)
+        .filter(
+            Operation.operation_type == "quarantine_duplicate",
+            Operation.status.in_(("planned", "confirmed", "executed")),
+            Operation.asset_id.is_not(None),
+        )
+        .all()
+    }
     groups = session.query(DuplicateGroup).order_by(DuplicateGroup.id).all()
     for group in groups:
         assets = (
@@ -51,16 +76,7 @@ def create_duplicate_quarantine_plan(session: Session, keep_root: str) -> dict[s
         for asset in assets:
             if asset.id == keep_asset.id:
                 continue
-            existing = (
-                session.query(Operation.id)
-                .filter(
-                    Operation.operation_type == "quarantine_duplicate",
-                    Operation.asset_id == asset.id,
-                    Operation.status.in_(("planned", "confirmed", "executed")),
-                )
-                .first()
-            )
-            if existing is not None:
+            if asset.id in assets_with_active_operation:
                 continue
             planned_operations.append(
                 {
@@ -93,6 +109,144 @@ def create_duplicate_quarantine_plan(session: Session, keep_root: str) -> dict[s
 
     session.commit()
     return {"batch_id": batch.id, "operations": len(planned_operations)}
+
+
+def _has_active_quarantine_operation(session: Session, asset_id: int) -> bool:
+    return (
+        session.query(Operation.id)
+        .filter(
+            Operation.operation_type == "quarantine_duplicate",
+            Operation.asset_id == asset_id,
+            Operation.status.in_(("planned", "confirmed", "executed")),
+        )
+        .first()
+        is not None
+    )
+
+
+def _has_safe_keep_copy(session: Session, asset: Asset) -> bool:
+    """A quarantine is only safe if a byte-identical copy is being retained (i.e.
+    a same-MD5 sibling that the plan did not schedule for quarantine) and that
+    copy still exists on disk, so we never remove the last accessible copy.
+
+    This relies on the plan's own keep decision rather than re-matching the keep
+    root string, which makes it robust to path-encoding differences between the
+    configured keep root and the indexed asset paths.
+    """
+    if not asset.hash_md5:
+        return False
+    siblings = (
+        session.query(Asset)
+        .filter(Asset.hash_md5 == asset.hash_md5, Asset.id != asset.id)
+        .all()
+    )
+    for sibling in siblings:
+        if _has_active_quarantine_operation(session, sibling.id):
+            continue
+        if Path(_asset_path(sibling)).exists():
+            return True
+    return False
+
+
+def _refresh_batch_status(session: Session, batch_id: int) -> None:
+    batch = session.get(OperationBatch, batch_id)
+    if batch is None or batch.status not in ("planned", "confirmed"):
+        return
+    unresolved = (
+        session.query(Operation.id)
+        .filter(
+            Operation.batch_id == batch_id,
+            Operation.status.in_(("planned", "confirmed")),
+        )
+        .first()
+    )
+    if unresolved is not None:
+        return
+    executed = (
+        session.query(Operation.id)
+        .filter(Operation.batch_id == batch_id, Operation.status == "executed")
+        .first()
+    )
+    batch.status = "executed" if executed is not None else "failed"
+
+
+def auto_quarantine_exact_duplicates(
+    *,
+    session: Session,
+    keep_root: str,
+    quarantine_root: str | Path,
+    limit: int,
+    action: str = "quarantine",
+) -> dict[str, int]:
+    """Automatically approve and remove byte-identical (exact MD5) duplicates.
+
+    This is safe to automate because an exact MD5 match means the files are
+    identical, and each operation is only executed when a verified keep copy
+    (a same-MD5 sibling not scheduled for removal, present on disk) still exists
+    for the same content. With ``action="delete"`` the redundant copy is removed
+    permanently (no quarantine backup); with ``action="quarantine"`` the move is
+    reversible.
+    """
+    summary = {
+        "considered": 0,
+        "executed": 0,
+        "failed": 0,
+        "held_no_keep_copy": 0,
+        "skipped_missing_source": 0,
+    }
+    if limit <= 0:
+        return summary
+
+    operations = (
+        session.query(Operation)
+        .filter(
+            Operation.operation_type == "quarantine_duplicate",
+            Operation.status == "planned",
+        )
+        .order_by(Operation.id)
+        .limit(limit)
+        .all()
+    )
+    summary["considered"] = len(operations)
+    touched_batches: set[int] = set()
+
+    for operation in operations:
+        touched_batches.add(operation.batch_id)
+        asset = session.get(Asset, operation.asset_id) if operation.asset_id is not None else None
+        if asset is None:
+            continue
+
+        if not _has_safe_keep_copy(session, asset):
+            summary["held_no_keep_copy"] += 1
+            continue
+
+        source = Path(operation.from_path)
+        if not source.exists():
+            summary["skipped_missing_source"] += 1
+            continue
+
+        try:
+            to_path = _perform_file_removal(source, quarantine_root, action)
+        except Exception:
+            operation.status = "failed"
+            summary["failed"] += 1
+            continue
+
+        operation.to_path = to_path
+        operation.status = "executed"
+        if action == "delete":
+            asset.status = "deleted"
+        else:
+            asset.current_path = to_path
+            asset.status = "quarantined"
+        summary["executed"] += 1
+
+    session.flush()
+    for batch_id in touched_batches:
+        _refresh_batch_status(session, batch_id)
+
+    session.commit()
+    return summary
 
 
 def exclude_operation(session: Session, operation_id: int) -> dict[str, int | str]:
@@ -294,45 +448,124 @@ def execute_confirmed_batch(
     session: Session,
     batch_id: int,
     quarantine_root: str | Path,
+    *,
+    action: str = "quarantine",
+    limit: int | None = None,
+    chunk_size: int = 500,
 ) -> dict[str, int | str]:
+    """Execute a confirmed duplicate batch in bounded, incrementally-committed
+    chunks so large batches do not load every operation/asset into memory at
+    once (which previously exhausted RAM and crashed the run).
+
+    The work is resumable: each chunk commits, and the batch stays ``confirmed``
+    until fully drained, so a later call (or workflow round) continues where this
+    left off. ``limit`` caps how many operations a single call processes.
+
+    With ``action="delete"`` a redundant copy is only removed once a verified
+    byte-identical keep copy still exists on disk, so the last accessible copy is
+    never deleted.
+    """
     batch = session.get(OperationBatch, batch_id)
     if batch is None:
         raise ValueError(f"Operation batch not found: {batch_id}")
     if batch.status != "confirmed":
         raise ValueError(f"Operation batch is not confirmed: {batch.status}")
 
-    operations = (
-        session.query(Operation)
-        .filter(Operation.batch_id == batch_id, Operation.status == "confirmed")
-        .order_by(Operation.id)
-        .all()
-    )
     executed = 0
     failed = 0
-    for operation in operations:
-        try:
+    held_no_keep_copy = 0
+    skipped_missing_source = 0
+    processed = 0
+    cursor = 0
+    reached_limit = False
+
+    while not reached_limit:
+        remaining = None if limit is None else max(0, limit - processed)
+        if remaining == 0:
+            break
+        fetch = chunk_size if remaining is None else min(chunk_size, remaining)
+        operations = (
+            session.query(Operation)
+            .filter(
+                Operation.batch_id == batch_id,
+                Operation.status == "confirmed",
+                Operation.id > cursor,
+            )
+            .order_by(Operation.id)
+            .limit(fetch)
+            .all()
+        )
+        if not operations:
+            break
+
+        for operation in operations:
+            cursor = operation.id
+            processed += 1
+            asset = (
+                session.get(Asset, operation.asset_id)
+                if operation.asset_id is not None
+                else None
+            )
+
             if operation.operation_type != "quarantine_duplicate":
-                raise ValueError(f"Unsupported operation type: {operation.operation_type}")
-            destination = move_to_quarantine(Path(operation.from_path), Path(quarantine_root))
-        except Exception:
-            operation.status = "failed"
-            failed += 1
-            continue
+                operation.status = "failed"
+                failed += 1
+            elif action == "delete" and (asset is None or not _has_safe_keep_copy(session, asset)):
+                # Never delete the last accessible copy; leave it confirmed for a
+                # later attempt (cursor advances so this call does not re-scan it).
+                held_no_keep_copy += 1
+            else:
+                source = Path(operation.from_path)
+                if not source.exists():
+                    operation.status = "executed"
+                    operation.to_path = "" if action == "delete" else operation.to_path
+                    if asset is not None:
+                        asset.status = "deleted" if action == "delete" else "quarantined"
+                    skipped_missing_source += 1
+                else:
+                    try:
+                        to_path = _perform_file_removal(source, quarantine_root, action)
+                    except Exception:
+                        operation.status = "failed"
+                        failed += 1
+                    else:
+                        operation.to_path = to_path
+                        operation.status = "executed"
+                        if asset is not None:
+                            if action == "delete":
+                                asset.status = "deleted"
+                            else:
+                                asset.current_path = to_path
+                                asset.status = "quarantined"
+                        executed += 1
 
-        operation.to_path = str(destination)
-        operation.status = "executed"
-        if operation.asset_id is not None:
-            asset = session.get(Asset, operation.asset_id)
-            if asset is not None:
-                asset.current_path = str(destination)
-                asset.status = "quarantined"
-        executed += 1
+            if limit is not None and processed >= limit:
+                reached_limit = True
+                break
 
-    batch.status = "executed" if failed == 0 else "failed"
-    session.commit()
+        session.commit()
+        session.expire_all()
+
+    remaining_confirmed = (
+        session.query(Operation.id)
+        .filter(Operation.batch_id == batch_id, Operation.status == "confirmed")
+        .first()
+    )
+    batch = session.get(OperationBatch, batch_id)
+    if remaining_confirmed is None:
+        any_executed = (
+            session.query(Operation.id)
+            .filter(Operation.batch_id == batch_id, Operation.status == "executed")
+            .first()
+        )
+        batch.status = "executed" if any_executed is not None else "failed"
+        session.commit()
+
     return {
-        "batch_id": batch.id,
+        "batch_id": batch_id,
         "executed": executed,
         "failed": failed,
+        "held_no_keep_copy": held_no_keep_copy,
+        "skipped_missing_source": skipped_missing_source,
         "status": batch.status,
     }

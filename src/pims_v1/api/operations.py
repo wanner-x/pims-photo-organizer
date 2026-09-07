@@ -87,6 +87,7 @@ def execute_batch(
             session=session,
             batch_id=batch_id,
             quarantine_root=settings.quarantine_root,
+            action=settings.duplicate_action,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

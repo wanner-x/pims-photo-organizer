@@ -107,6 +107,35 @@ def recover_stale_tasks(
     return {"recovered": len(tasks)}
 
 
+def reset_failed_tasks(
+    session: Session,
+    task_type: str | None = None,
+    limit: int | None = None,
+) -> dict[str, int]:
+    """Requeue previously failed tasks so they can be retried.
+
+    Useful after fixing a systematic processing error (for example raising the
+    image pixel ceiling): the affected assets still have NULL hashes, but their
+    tasks are stuck in the ``failed`` state and would never be picked up again.
+    """
+    query = (
+        session.query(ProcessingTask)
+        .filter(ProcessingTask.status == "failed")
+        .order_by(ProcessingTask.id)
+    )
+    if task_type is not None:
+        query = query.filter(ProcessingTask.task_type == task_type)
+    if limit is not None:
+        query = query.limit(limit)
+
+    tasks = query.all()
+    for task in tasks:
+        task.status = "pending"
+        task.last_error = None
+    session.commit()
+    return {"reset": len(tasks)}
+
+
 def list_tasks(
     session: Session,
     status: str | None = None,

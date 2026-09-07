@@ -25,6 +25,11 @@ dependencies = [
 dev = [
   "pytest>=8.2.0",
 ]
+# Local ONNX NSFW backend (PIMS_NSFW_BACKEND=onnx); heuristic default needs neither.
+nsfw = [
+  "onnxruntime>=1.27.0",
+  "numpy>=2.0.0",
+]
 
 [project.scripts]
 pims = "pims_v1.cli:main"

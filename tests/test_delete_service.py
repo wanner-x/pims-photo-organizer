@@ -1,4 +1,26 @@
-from pims_v1.services.delete_service import move_to_quarantine
+from pims_v1.services.delete_service import delete_file, move_to_quarantine
+
+
+def test_delete_file_removes_source(tmp_path):
+    source = tmp_path / "delete-me.jpg"
+    source.write_bytes(b"content")
+
+    delete_file(source)
+
+    assert not source.exists()
+
+
+def test_delete_file_removes_read_only_source(tmp_path):
+    import os
+    import stat
+
+    source = tmp_path / "read-only.jpg"
+    source.write_bytes(b"content")
+    os.chmod(source, stat.S_IREAD)
+
+    delete_file(source)
+
+    assert not source.exists()
 
 
 def test_move_to_quarantine_preserves_file(tmp_path):

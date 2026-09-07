@@ -19,8 +19,50 @@ from pims_v1.models.series import Series, SeriesCandidate, SeriesCandidateAsset,
 from pims_v1.services.archive_decision_service import (
     auto_archive_candidate,
     auto_archive_candidates,
+    merge_archive_plans,
     rollback_archive_execution,
 )
+
+
+def _plan(category, title, confidence, *, risk_flags=None, r18=False):
+    return {
+        "category": category,
+        "title": title,
+        "confidence": confidence,
+        "risk_flags": risk_flags or [],
+        "r18_label": r18,
+        "tags": [],
+        "plan_summary": "",
+    }
+
+
+def test_merge_archive_plans_auto_applies_confident_ai_on_disagreement():
+    merged = merge_archive_plans(
+        rule_plan=_plan("RuleCat", "Rule Title", 0.4),
+        ai_plan=_plan("AiCat", "Ai Title", 0.92),
+        ai_auto_apply_min_confidence=0.85,
+    )
+    assert merged["decision_type"] == "auto_apply"
+    assert merged["category"] == "AiCat"
+    assert merged["title"] == "Ai Title"
+
+
+def test_merge_archive_plans_manual_review_when_ai_not_confident():
+    merged = merge_archive_plans(
+        rule_plan=_plan("RuleCat", "Rule Title", 0.4),
+        ai_plan=_plan("AiCat", "Ai Title", 0.6),
+        ai_auto_apply_min_confidence=0.85,
+    )
+    assert merged["decision_type"] == "manual_review"
+
+
+def test_merge_archive_plans_keeps_r18_manual_even_when_confident():
+    merged = merge_archive_plans(
+        rule_plan=_plan("RuleCat", "Rule Title", 0.4),
+        ai_plan=_plan("AiCat", "Ai Title", 0.99, risk_flags=["r18_suspected"], r18=True),
+        ai_auto_apply_min_confidence=0.85,
+    )
+    assert merged["decision_type"] == "manual_review"
 
 
 class StaticAIPlanClient:

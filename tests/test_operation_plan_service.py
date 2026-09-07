@@ -9,6 +9,7 @@ from pims_v1.models.duplicate import DuplicateGroup, DuplicateGroupAsset
 from pims_v1.models.library import Library
 from pims_v1.models.operation import Operation, OperationBatch
 from pims_v1.services.operation_plan_service import (
+    auto_quarantine_exact_duplicates,
     confirm_operation_batch,
     create_duplicate_quarantine_plan,
     execute_confirmed_batch,
@@ -256,12 +257,272 @@ def test_execute_confirmed_batch_moves_files_to_quarantine(tmp_path):
 
     operation_row = session.query(Operation).one()
     session.refresh(asset_row)
-    assert summary == {"batch_id": batch.id, "executed": 1, "failed": 0, "status": "executed"}
+    assert summary["batch_id"] == batch.id
+    assert summary["executed"] == 1
+    assert summary["failed"] == 0
+    assert summary["status"] == "executed"
     assert not source.exists()
     assert operation_row.status == "executed"
     assert operation_row.to_path is not None
     assert asset_row.status == "quarantined"
     assert asset_row.current_path == operation_row.to_path
+
+
+def test_auto_quarantine_exact_duplicates_moves_safe_duplicate(tmp_path):
+    session = make_session(tmp_path)
+    keep_root = tmp_path / "nas"
+    local_root = tmp_path / "pc"
+    keep_root.mkdir()
+    local_root.mkdir()
+    keep_file = keep_root / "a.jpg"
+    local_file = local_root / "a.jpg"
+    keep_file.write_bytes(b"identical")
+    local_file.write_bytes(b"identical")
+
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    keep_asset = add_asset(session, library_row.id, str(keep_file), "same")
+    local_asset = add_asset(session, library_row.id, str(local_file), "same")
+    group = DuplicateGroup(hash_md5="same", asset_count=2)
+    session.add(group)
+    session.flush()
+    session.add_all(
+        [
+            DuplicateGroupAsset(group_id=group.id, asset_id=keep_asset.id),
+            DuplicateGroupAsset(group_id=group.id, asset_id=local_asset.id),
+        ]
+    )
+    session.commit()
+
+    plan = create_duplicate_quarantine_plan(session=session, keep_root=str(keep_root))
+
+    summary = auto_quarantine_exact_duplicates(
+        session=session,
+        keep_root=str(keep_root),
+        quarantine_root=tmp_path / ".quarantine",
+        limit=10,
+    )
+
+    session.refresh(local_asset)
+    batch = session.get(OperationBatch, plan["batch_id"])
+    operation = session.query(Operation).filter(Operation.asset_id == local_asset.id).one()
+    assert summary["executed"] == 1
+    assert summary["held_no_keep_copy"] == 0
+    assert not local_file.exists()
+    assert keep_file.exists()
+    assert operation.status == "executed"
+    assert local_asset.status == "quarantined"
+    assert batch.status == "executed"
+
+
+def test_auto_quarantine_holds_when_keep_copy_missing_on_disk(tmp_path):
+    session = make_session(tmp_path)
+    keep_root = tmp_path / "nas"
+    local_root = tmp_path / "pc"
+    keep_root.mkdir()
+    local_root.mkdir()
+    local_file = local_root / "a.jpg"
+    local_file.write_bytes(b"identical")
+    # keep copy is recorded in DB but does NOT exist on disk (e.g. NAS unmounted)
+    keep_path = keep_root / "a.jpg"
+
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    keep_asset = add_asset(session, library_row.id, str(keep_path), "same")
+    local_asset = add_asset(session, library_row.id, str(local_file), "same")
+    group = DuplicateGroup(hash_md5="same", asset_count=2)
+    session.add(group)
+    session.flush()
+    session.add_all(
+        [
+            DuplicateGroupAsset(group_id=group.id, asset_id=keep_asset.id),
+            DuplicateGroupAsset(group_id=group.id, asset_id=local_asset.id),
+        ]
+    )
+    session.commit()
+
+    create_duplicate_quarantine_plan(session=session, keep_root=str(keep_root))
+
+    summary = auto_quarantine_exact_duplicates(
+        session=session,
+        keep_root=str(keep_root),
+        quarantine_root=tmp_path / ".quarantine",
+        limit=10,
+    )
+
+    session.refresh(local_asset)
+    operation = session.query(Operation).filter(Operation.asset_id == local_asset.id).one()
+    assert summary["executed"] == 0
+    assert summary["held_no_keep_copy"] == 1
+    assert local_file.exists()
+    assert operation.status == "planned"
+
+
+def _build_confirmed_delete_fixture(tmp_path, count: int):
+    session = make_session(tmp_path)
+    keep_root = tmp_path / "nas"
+    keep_root.mkdir()
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    batch = OperationBatch(batch_type="duplicate_quarantine", status="confirmed")
+    session.add(batch)
+    session.flush()
+    # One retained keep copy on disk so deletes are safe.
+    keep_file = keep_root / "keep.jpg"
+    keep_file.write_bytes(b"identical")
+    add_asset(session, library_row.id, str(keep_file), "same")
+    dup_files = []
+    for index in range(count):
+        dup = tmp_path / f"dup_{index}.jpg"
+        dup.write_bytes(b"identical")
+        dup_files.append(dup)
+        dup_asset = add_asset(session, library_row.id, str(dup), "same")
+        session.add(
+            Operation(
+                batch_id=batch.id,
+                operation_type="quarantine_duplicate",
+                asset_id=dup_asset.id,
+                from_path=str(dup),
+                status="confirmed",
+            )
+        )
+    session.commit()
+    return session, batch, keep_file, dup_files
+
+
+def test_execute_confirmed_batch_deletes_without_quarantine_backup(tmp_path):
+    session, batch, keep_file, dup_files = _build_confirmed_delete_fixture(tmp_path, 1)
+    quarantine_root = tmp_path / ".quarantine"
+
+    summary = execute_confirmed_batch(
+        session=session,
+        batch_id=batch.id,
+        quarantine_root=quarantine_root,
+        action="delete",
+    )
+
+    operation_row = session.query(Operation).filter(Operation.from_path == str(dup_files[0])).one()
+    assert summary["executed"] == 1
+    assert summary["status"] == "executed"
+    assert not dup_files[0].exists()
+    assert keep_file.exists()
+    # delete leaves no quarantine backup behind
+    assert not quarantine_root.exists() or not any(quarantine_root.iterdir())
+    assert operation_row.status == "executed"
+    asset_row = session.get(Asset, operation_row.asset_id)
+    assert asset_row.status == "deleted"
+
+
+def test_execute_confirmed_batch_delete_holds_when_no_safe_keep_copy(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    batch = OperationBatch(batch_type="duplicate_quarantine", status="confirmed")
+    session.add(batch)
+    session.flush()
+    only = tmp_path / "only.jpg"
+    only.write_bytes(b"identical")
+    only_asset = add_asset(session, library_row.id, str(only), "same")
+    session.add(
+        Operation(
+            batch_id=batch.id,
+            operation_type="quarantine_duplicate",
+            asset_id=only_asset.id,
+            from_path=str(only),
+            status="confirmed",
+        )
+    )
+    session.commit()
+
+    summary = execute_confirmed_batch(
+        session=session,
+        batch_id=batch.id,
+        quarantine_root=tmp_path / ".quarantine",
+        action="delete",
+    )
+
+    assert summary["executed"] == 0
+    assert summary["held_no_keep_copy"] == 1
+    assert only.exists()
+    operation_row = session.query(Operation).one()
+    assert operation_row.status == "confirmed"
+
+
+def test_execute_confirmed_batch_respects_limit_and_is_resumable(tmp_path):
+    session, batch, keep_file, dup_files = _build_confirmed_delete_fixture(tmp_path, 5)
+
+    first = execute_confirmed_batch(
+        session=session,
+        batch_id=batch.id,
+        quarantine_root=tmp_path / ".quarantine",
+        action="delete",
+        limit=2,
+        chunk_size=1,
+    )
+    assert first["executed"] == 2
+    assert first["status"] == "confirmed"
+    remaining = session.query(Operation).filter(Operation.status == "confirmed").count()
+    assert remaining == 3
+
+    second = execute_confirmed_batch(
+        session=session,
+        batch_id=batch.id,
+        quarantine_root=tmp_path / ".quarantine",
+        action="delete",
+        limit=100,
+        chunk_size=2,
+    )
+    assert second["executed"] == 3
+    assert second["status"] == "executed"
+    assert session.query(Operation).filter(Operation.status == "confirmed").count() == 0
+    assert all(not dup.exists() for dup in dup_files)
+    assert keep_file.exists()
+
+
+def test_auto_quarantine_deletes_when_action_delete(tmp_path):
+    session = make_session(tmp_path)
+    keep_root = tmp_path / "nas"
+    keep_root.mkdir()
+    keep_file = keep_root / "a.jpg"
+    local_file = tmp_path / "a.jpg"
+    keep_file.write_bytes(b"identical")
+    local_file.write_bytes(b"identical")
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    keep_asset = add_asset(session, library_row.id, str(keep_file), "same")
+    local_asset = add_asset(session, library_row.id, str(local_file), "same")
+    group = DuplicateGroup(hash_md5="same", asset_count=2)
+    session.add(group)
+    session.flush()
+    session.add_all(
+        [
+            DuplicateGroupAsset(group_id=group.id, asset_id=keep_asset.id),
+            DuplicateGroupAsset(group_id=group.id, asset_id=local_asset.id),
+        ]
+    )
+    session.commit()
+
+    create_duplicate_quarantine_plan(session=session, keep_root=str(keep_root))
+    quarantine_root = tmp_path / ".quarantine"
+    summary = auto_quarantine_exact_duplicates(
+        session=session,
+        keep_root=str(keep_root),
+        quarantine_root=quarantine_root,
+        limit=10,
+        action="delete",
+    )
+
+    session.refresh(local_asset)
+    assert summary["executed"] == 1
+    assert not local_file.exists()
+    assert keep_file.exists()
+    assert not quarantine_root.exists() or not any(quarantine_root.iterdir())
+    assert local_asset.status == "deleted"
 
 
 def test_execute_confirmed_batch_rejects_unconfirmed_batch(tmp_path):

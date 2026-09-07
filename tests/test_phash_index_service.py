@@ -72,6 +72,36 @@ def test_compute_missing_phash_skips_non_image_assets(tmp_path):
     assert stored.hash_phash is None
 
 
+def test_compute_missing_phash_handles_large_image_above_legacy_limit(tmp_path):
+    import pims_v1.services.image_open_service as image_open_service
+
+    # 9500x9500 = 90.25M pixels, just above Pillow's historic ~89.5M default but
+    # below the raised PIMS ceiling, so it must hash successfully.
+    assert image_open_service.Image.MAX_IMAGE_PIXELS > 90_250_000
+    sample = tmp_path / "large.jpg"
+    Image.new("L", (9500, 9500), color=200).save(sample)
+    session = make_session(tmp_path)
+    library_row = add_library(session, str(tmp_path))
+    asset_row = Asset(
+        library_id=library_row.id,
+        original_path=str(sample),
+        current_path=str(sample),
+        file_name=sample.name,
+        file_ext=".jpg",
+        file_size=sample.stat().st_size,
+        mtime=sample.stat().st_mtime,
+    )
+    session.add(asset_row)
+    session.commit()
+
+    summary = compute_missing_phash(session=session, limit=10)
+
+    stored = session.query(Asset).one()
+    assert summary["processed"] == 1
+    assert summary["failed"] == 0
+    assert stored.hash_phash is not None
+
+
 def test_compute_missing_phash_counts_decompression_bomb_as_failed(tmp_path, monkeypatch):
     import pims_v1.services.image_open_service as image_open_service
 

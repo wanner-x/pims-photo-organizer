@@ -1,5 +1,7 @@
 from pathlib import Path
+import os
 import shutil
+import stat
 
 from pims_v1.services.archive_service import copy_to_archive, verify_archive_copy
 
@@ -24,6 +26,20 @@ def move_to_quarantine(source: Path, quarantine_root: Path) -> Path:
     destination = _unique_destination(quarantine_root, source)
     shutil.move(str(source), str(destination))
     return destination
+
+
+def delete_file(source: Path) -> None:
+    """Permanently remove a file. Used for byte-identical duplicates where a
+    verified keep copy still exists, so no quarantine backup is retained.
+
+    Read-only files (common on archived collections) would otherwise raise
+    ``PermissionError`` on Windows, so clear the read-only attribute and retry.
+    """
+    try:
+        source.unlink()
+    except PermissionError:
+        os.chmod(source, stat.S_IWRITE)
+        source.unlink()
 
 
 def archive_and_quarantine_if_verified(

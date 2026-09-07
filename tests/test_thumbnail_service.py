@@ -5,6 +5,7 @@ from pims_v1.db import Base
 from pims_v1.models import asset, duplicate, library, operation, processing, review, series
 from pims_v1.models.asset import Asset
 from pims_v1.models.library import Library
+from pims_v1.services.safe_workflow_service import build_pending_thumbnails
 from pims_v1.services.thumbnail_service import ensure_thumbnail
 
 
@@ -89,6 +90,71 @@ def test_ensure_thumbnail_reports_non_image(tmp_path):
         "status": "skipped_non_image",
         "path": None,
     }
+
+
+def test_build_pending_thumbnails_advances_past_existing(tmp_path):
+    from PIL import Image
+
+    session = make_session(tmp_path)
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    asset_ids = []
+    for index in range(3):
+        source = tmp_path / f"img_{index}.jpg"
+        Image.new("RGB", (40, 40), color="white").save(source)
+        asset_row = Asset(
+            library_id=library_row.id,
+            original_path=str(source),
+            current_path=str(source),
+            file_name=source.name,
+            file_ext=".jpg",
+            file_size=source.stat().st_size,
+            mtime=1.0,
+        )
+        session.add(asset_row)
+        session.flush()
+        asset_ids.append(asset_row.id)
+    session.commit()
+    cache_root = tmp_path / ".cache"
+
+    first = build_pending_thumbnails(session=session, cache_root=cache_root, limit=1)
+    second = build_pending_thumbnails(session=session, cache_root=cache_root, limit=1)
+    third = build_pending_thumbnails(session=session, cache_root=cache_root, limit=1)
+
+    assert first["created"] == 1
+    assert second["created"] == 1
+    assert third["created"] == 1
+    assert second["exists"] == 0
+    thumbnail_dir = cache_root / "thumbnails"
+    created = {int(p.stem) for p in thumbnail_dir.glob("*.jpg")}
+    assert created == set(asset_ids)
+
+
+def test_build_pending_thumbnails_skips_non_image_assets(tmp_path):
+    session = make_session(tmp_path)
+    library_row = Library(name="Photos", kind="local", root_path=str(tmp_path))
+    session.add(library_row)
+    session.flush()
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"video")
+    session.add(
+        Asset(
+            library_id=library_row.id,
+            original_path=str(video),
+            current_path=str(video),
+            file_name=video.name,
+            file_ext=".mp4",
+            file_size=video.stat().st_size,
+            mtime=1.0,
+        )
+    )
+    session.commit()
+
+    summary = build_pending_thumbnails(session=session, cache_root=tmp_path / ".cache", limit=5)
+
+    assert summary["created"] == 0
+    assert summary["skipped_non_image"] == 0
 
 
 def test_ensure_thumbnail_reports_decompression_bomb_as_failed(tmp_path, monkeypatch):

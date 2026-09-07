@@ -14,19 +14,48 @@ def test_settings_use_local_defaults(tmp_path):
 
 
 def test_settings_accept_deepseek_api_key():
-    settings = Settings(deepseek_api_key="test-key")
+    settings = Settings(_env_file=None, deepseek_api_key="test-key")
 
     assert settings.deepseek_api_key == "test-key"
     assert settings.deepseek_base_url == "https://api.deepseek.com"
-    assert settings.deepseek_model == "deepseek-v4-pro"
-    assert settings.deepseek_reasoning_effort == "high"
-    assert settings.deepseek_thinking_enabled is True
+    assert settings.deepseek_model == "deepseek-v4-flash"
+    assert settings.deepseek_reasoning_effort == "low"
+    assert settings.deepseek_thinking_enabled is False
+    assert settings.deepseek_max_tokens == 600
 
 
 def test_settings_accept_wechat_webhook_url():
     settings = Settings(wechat_webhook_url="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test")
 
     assert settings.wechat_webhook_url.endswith("key=test")
+
+
+def test_settings_nsfw_backend_defaults_keep_behaviour_unchanged():
+    settings = Settings(_env_file=None)
+
+    assert settings.nsfw_backend == "heuristic"
+    assert settings.nsfw_onnx_model_path.endswith("nudenet_classifier_model.onnx")
+
+
+def test_settings_accept_nsfw_onnx_backend():
+    settings = Settings(_env_file=None, nsfw_backend="onnx", nsfw_onnx_model_path="./data/models/custom.onnx")
+
+    assert settings.nsfw_backend == "onnx"
+    assert settings.nsfw_onnx_model_path == "./data/models/custom.onnx"
+
+
+def test_settings_wechat_throttle_defaults():
+    settings = Settings(_env_file=None)
+
+    assert settings.wechat_hourly_limit == 3
+    assert settings.wechat_digest is False
+
+
+def test_settings_accept_wechat_throttle_overrides():
+    settings = Settings(_env_file=None, wechat_hourly_limit=5, wechat_digest=True)
+
+    assert settings.wechat_hourly_limit == 5
+    assert settings.wechat_digest is True
 
 
 def test_settings_accept_review_url():

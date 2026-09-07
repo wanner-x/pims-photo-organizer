@@ -32,7 +32,7 @@ def ensure_thumbnail(
         return {"asset_id": asset.id, "status": "exists", "path": str(destination)}
 
     try:
-        with safe_image_open(source) as image:
+        with safe_image_open(source, prescale=size) as image:
             image.thumbnail(size)
             image.convert("RGB").save(destination, "JPEG", quality=85)
     except ImageProcessingError:

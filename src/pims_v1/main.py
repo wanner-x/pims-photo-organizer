@@ -6,6 +6,7 @@ from collections.abc import Generator
 from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from pims_v1.api.libraries import router as libraries_router
@@ -28,6 +29,8 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="PIMS V1", lifespan=lifespan)
+# 静态资源目录随包发布，用包相对路径定位，避免依赖启动时的 cwd。
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 app.include_router(libraries_router)
 app.include_router(review_router)
 app.include_router(operations_router)

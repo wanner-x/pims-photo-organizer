@@ -1,4 +1,4 @@
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from pims_v1.models.asset import Asset
@@ -6,6 +6,8 @@ from pims_v1.models.operation import Operation, OperationBatch
 from pims_v1.models.processing import ProcessingTask
 from pims_v1.models.review import ReviewItem
 from pims_v1.services.phash_index_service import IMAGE_SUFFIXES
+
+PROCESSABLE_ASSET_STATUSES = ("normal", "archived")
 
 
 def _percent(done: int, total: int) -> float:
@@ -15,10 +17,42 @@ def _percent(done: int, total: int) -> float:
 
 
 def review_progress_summary(session: Session) -> dict[str, object]:
-    total_assets = session.query(Asset).count()
-    md5_done = session.query(Asset).filter(Asset.hash_md5.is_not(None)).count()
-    phash_total = session.query(Asset).filter(Asset.file_ext.in_(sorted(IMAGE_SUFFIXES))).count()
-    phash_done = session.query(Asset).filter(Asset.hash_phash.is_not(None)).count()
+    # Single table scan instead of four separate COUNTs to reduce lock
+    # contention with the background workflow on large libraries.
+    total_assets, md5_done, phash_done, phash_total = session.query(
+        func.count(Asset.id),
+        func.count(Asset.hash_md5),
+        func.coalesce(
+            func.sum(
+                case(
+                    (
+                        Asset.status.in_(PROCESSABLE_ASSET_STATUSES)
+                        & Asset.hash_phash.is_not(None),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ),
+            0,
+        ),
+        func.coalesce(
+            func.sum(
+                case(
+                    (
+                        Asset.status.in_(PROCESSABLE_ASSET_STATUSES)
+                        & Asset.file_ext.in_(sorted(IMAGE_SUFFIXES)),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ),
+            0,
+        ),
+    ).one()
+    total_assets = int(total_assets or 0)
+    md5_done = int(md5_done or 0)
+    phash_done = int(phash_done or 0)
+    phash_total = int(phash_total or 0)
 
     task_rows = (
         session.query(

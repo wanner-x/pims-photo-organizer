@@ -125,6 +125,7 @@ def suggest_series_ai(
             model=settings.deepseek_model,
             reasoning_effort=settings.deepseek_reasoning_effort,
             thinking_enabled=settings.deepseek_thinking_enabled,
+            max_tokens=settings.deepseek_max_tokens,
         )
         return suggest_series_organization(
             session=session,
@@ -149,6 +150,7 @@ def auto_archive_series(
             model=settings.deepseek_model,
             reasoning_effort=settings.deepseek_reasoning_effort,
             thinking_enabled=settings.deepseek_thinking_enabled,
+            max_tokens=settings.deepseek_max_tokens,
         )
         archive_root = settings.keep_root
         if not archive_root:

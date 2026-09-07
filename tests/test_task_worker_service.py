@@ -68,6 +68,7 @@ def test_process_md5_tasks_marks_missing_file_failed(tmp_path):
     assert summary == {"processed": 0, "failed": 1, "skipped_oversize": 0}
     assert task.status == "failed"
     assert "missing file" in task.last_error
+    assert asset_row.status == "missing"
 
 
 def test_process_md5_tasks_completes_oversize_without_hashing(tmp_path):
@@ -144,6 +145,30 @@ def test_process_phash_tasks_hashes_image_and_completes_task(tmp_path):
     assert task.status == "completed"
 
 
+def test_process_phash_tasks_concurrent_hashes_all_images(tmp_path):
+    from PIL import Image
+
+    session = make_session(tmp_path)
+    tasks = []
+    assets = []
+    for index in range(6):
+        source = tmp_path / f"img_{index}.jpg"
+        Image.new("RGB", (8, 8), color=(index * 30 % 255, 0, 0)).save(source)
+        asset_row = add_asset(session, source)
+        assets.append(asset_row)
+        tasks.append(enqueue_task(session, "hash_phash", "asset", asset_row.id))
+
+    summary = process_phash_tasks(session=session, limit=10, concurrency=4)
+
+    assert summary == {"processed": 6, "failed": 0, "skipped_non_image": 0}
+    for asset_row, task in zip(assets, tasks):
+        session.refresh(asset_row)
+        session.refresh(task)
+        assert asset_row.hash_phash is not None
+        assert asset_row.stage == "phash_done"
+        assert task.status == "completed"
+
+
 def test_process_phash_tasks_skips_non_image_task(tmp_path):
     session = make_session(tmp_path)
     source = tmp_path / "a.txt"
@@ -159,6 +184,24 @@ def test_process_phash_tasks_skips_non_image_task(tmp_path):
     assert asset_row.hash_phash is None
     assert asset_row.stage == "phash_skipped_non_image"
     assert task.status == "completed"
+
+
+def test_process_phash_tasks_marks_missing_file_asset_missing(tmp_path):
+    session = make_session(tmp_path)
+    source = tmp_path / "missing.jpg"
+    source.write_bytes(b"exists-for-index")
+    asset_row = add_asset(session, source)
+    source.unlink()
+    task = enqueue_task(session, "hash_phash", "asset", asset_row.id)
+
+    summary = process_phash_tasks(session=session, limit=10)
+
+    session.refresh(asset_row)
+    session.refresh(task)
+    assert summary == {"processed": 0, "failed": 1, "skipped_non_image": 0}
+    assert asset_row.status == "missing"
+    assert task.status == "failed"
+    assert "missing file" in task.last_error
 
 
 def test_process_phash_tasks_marks_decompression_bomb_failed(tmp_path, monkeypatch):
@@ -182,5 +225,40 @@ def test_process_phash_tasks_marks_decompression_bomb_failed(tmp_path, monkeypat
     session.refresh(task)
     assert summary == {"processed": 0, "failed": 1, "skipped_non_image": 0}
     assert asset_row.hash_phash is None
+    assert asset_row.status == "invalid_image"
+    assert asset_row.stage == "phash_failed"
+    assert task.status == "failed"
+    assert "too many pixels" in task.last_error
+
+
+def test_process_phash_tasks_converts_decompression_warning_to_failed_task(tmp_path, monkeypatch):
+    from PIL import Image
+    import warnings
+    import pims_v1.services.task_worker_service as task_worker_service
+
+    session = make_session(tmp_path)
+    source = tmp_path / "huge-warning.jpg"
+    Image.new("RGB", (8, 8), color="white").save(source)
+    asset_row = add_asset(session, source)
+    task = enqueue_task(session, "hash_phash", "asset", asset_row.id)
+    original_open = task_worker_service.Image.open
+
+    def warn_then_open(path):
+        warnings.warn(
+            Image.DecompressionBombWarning("too many pixels"),
+            stacklevel=2,
+        )
+        return original_open(path)
+
+    monkeypatch.setattr(task_worker_service.Image, "open", warn_then_open)
+
+    summary = process_phash_tasks(session=session, limit=10)
+
+    session.refresh(asset_row)
+    session.refresh(task)
+    assert summary == {"processed": 0, "failed": 1, "skipped_non_image": 0}
+    assert asset_row.hash_phash is None
+    assert asset_row.status == "invalid_image"
+    assert asset_row.stage == "phash_failed"
     assert task.status == "failed"
     assert "too many pixels" in task.last_error

@@ -13,6 +13,7 @@ from pims_v1.services.task_service import (
     fail_task,
     list_tasks,
     recover_stale_tasks,
+    reset_failed_tasks,
 )
 from pims_v1.services.task_service import recover_stale_status
 
@@ -93,6 +94,42 @@ def test_complete_and_fail_task_update_final_status(tmp_path):
     assert completed.status == "completed"
     assert failed.status == "failed"
     assert failed.last_error == "missing file"
+
+
+def test_reset_failed_tasks_requeues_only_failed(tmp_path):
+    session = make_session(tmp_path)
+    failed_phash = enqueue_task(session, "hash_phash", "asset", 1)
+    failed_phash.status = "failed"
+    failed_phash.last_error = "phash failed: too many pixels"
+    failed_md5 = enqueue_task(session, "hash_md5", "asset", 2)
+    failed_md5.status = "failed"
+    completed = enqueue_task(session, "hash_phash", "asset", 3)
+    completed.status = "completed"
+    session.commit()
+
+    summary = reset_failed_tasks(session, task_type="hash_phash")
+
+    session.refresh(failed_phash)
+    session.refresh(failed_md5)
+    session.refresh(completed)
+    assert summary == {"reset": 1}
+    assert failed_phash.status == "pending"
+    assert failed_phash.last_error is None
+    assert failed_md5.status == "failed"
+    assert completed.status == "completed"
+
+
+def test_reset_failed_tasks_without_type_resets_all(tmp_path):
+    session = make_session(tmp_path)
+    first = enqueue_task(session, "hash_phash", "asset", 1)
+    first.status = "failed"
+    second = enqueue_task(session, "hash_md5", "asset", 2)
+    second.status = "failed"
+    session.commit()
+
+    summary = reset_failed_tasks(session)
+
+    assert summary == {"reset": 2}
 
 
 def test_list_tasks_filters_by_status(tmp_path):

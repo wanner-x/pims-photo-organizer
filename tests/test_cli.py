@@ -306,6 +306,8 @@ def test_execute_batch_cli_moves_confirmed_file_to_quarantine(tmp_path, capsys, 
             "pims",
             "execute-batch",
             str(batch_id),
+            "--action",
+            "quarantine",
             "--quarantine-root",
             str(tmp_path / ".quarantine"),
             "--database-url",
@@ -516,9 +518,11 @@ def test_suggest_series_title_cli_uses_injected_client(tmp_path, capsys, monkeyp
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
+    client_kwargs = {}
+
     class FakeClient:
         def __init__(self, **kwargs) -> None:
-            pass
+            client_kwargs.update(kwargs)
 
         def chat(self, messages):
             return "AI Title"
@@ -559,6 +563,7 @@ def test_suggest_series_title_cli_uses_injected_client(tmp_path, capsys, monkeyp
     )
 
     assert main() == 0
+    assert client_kwargs["max_tokens"] == 600
 
     output = capsys.readouterr().out
     assert "title=AI Title" in output

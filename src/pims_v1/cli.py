@@ -18,6 +18,7 @@ from pims_v1.services.hash_index_service import compute_missing_md5
 from pims_v1.services.index_service import index_library
 from pims_v1.services.notification_service import notify_workflow_event
 from pims_v1.services.operation_plan_service import (
+    auto_quarantine_exact_duplicates,
     confirm_operation_batch,
     create_duplicate_quarantine_plan,
     exclude_operation,
@@ -26,16 +27,20 @@ from pims_v1.services.operation_plan_service import (
 )
 from pims_v1.services.phash_index_service import IMAGE_SUFFIXES, compute_missing_phash
 from pims_v1.services.review_service import list_series_candidates
-from pims_v1.services.safe_workflow_service import run_safe_workflow
+from pims_v1.services.safe_workflow_service import build_pending_thumbnails, run_safe_workflow
 from pims_v1.services.scan_service import DEFAULT_MEDIA_SUFFIXES, ScanService
 from pims_v1.services.series_moderation_service import review_series_r18
 from pims_v1.services.series_index_service import build_series_candidates
 from pims_v1.services.series_confirm_service import confirm_series_candidate
 from pims_v1.services.similar_index_service import build_similar_image_reviews
 from pims_v1.services.status_service import database_status
-from pims_v1.services.task_service import enqueue_task, list_tasks, recover_stale_tasks
+from pims_v1.services.task_service import (
+    enqueue_task,
+    list_tasks,
+    recover_stale_tasks,
+    reset_failed_tasks,
+)
 from pims_v1.services.task_worker_service import process_md5_tasks, process_phash_tasks
-from pims_v1.services.thumbnail_service import ensure_thumbnail
 from pims_v1.services.visual_moderation_service import build_visual_moderation_client
 
 
@@ -100,7 +105,20 @@ def build_parser() -> ArgumentParser:
     execute_batch = subparsers.add_parser("execute-batch")
     execute_batch.add_argument("batch_id", type=int)
     execute_batch.add_argument("--quarantine-root", default=settings.quarantine_root)
+    execute_batch.add_argument(
+        "--action", choices=("quarantine", "delete"), default=settings.duplicate_action
+    )
+    execute_batch.add_argument("--limit", type=int, default=None)
     execute_batch.add_argument("--database-url", default=settings.database_url)
+
+    auto_quarantine = subparsers.add_parser("auto-quarantine-duplicates")
+    auto_quarantine.add_argument("--keep-root", default=settings.keep_root, required=settings.keep_root is None)
+    auto_quarantine.add_argument("--quarantine-root", default=settings.quarantine_root)
+    auto_quarantine.add_argument("--limit", type=int, default=200)
+    auto_quarantine.add_argument(
+        "--action", choices=("quarantine", "delete"), default=settings.duplicate_action
+    )
+    auto_quarantine.add_argument("--database-url", default=settings.database_url)
 
     enqueue_md5 = subparsers.add_parser("enqueue-md5-tasks")
     enqueue_md5.add_argument("--limit", type=int, default=None)
@@ -114,6 +132,11 @@ def build_parser() -> ArgumentParser:
     recover_tasks = subparsers.add_parser("recover-tasks")
     recover_tasks.add_argument("--stale-after-seconds", type=int, default=300)
     recover_tasks.add_argument("--database-url", default=settings.database_url)
+
+    reset_failed = subparsers.add_parser("reset-failed-tasks")
+    reset_failed.add_argument("--task-type", default=None)
+    reset_failed.add_argument("--limit", type=int, default=None)
+    reset_failed.add_argument("--database-url", default=settings.database_url)
 
     process_md5 = subparsers.add_parser("process-md5-tasks")
     process_md5.add_argument("--limit", type=int, default=100)
@@ -162,6 +185,8 @@ def build_parser() -> ArgumentParser:
     safe_workflow.add_argument("--ai-suggest-limit", type=int, default=settings.ai_suggest_limit)
     safe_workflow.add_argument("--r18-scan-limit", type=int, default=settings.r18_scan_limit)
     safe_workflow.add_argument("--auto-archive-limit", type=int, default=20)
+    safe_workflow.add_argument("--auto-quarantine-limit", type=int, default=settings.auto_quarantine_limit)
+    safe_workflow.add_argument("--quarantine-root", default=settings.quarantine_root)
     safe_workflow.add_argument("--similar-limit", type=int, default=0)
     safe_workflow.add_argument("--similar-threshold", type=int, default=6)
     safe_workflow.add_argument("--database-url", default=settings.database_url)
@@ -175,6 +200,7 @@ def build_parser() -> ArgumentParser:
     notify_wechat.add_argument("--webhook-url", default=settings.wechat_webhook_url)
     notify_wechat.add_argument("--title", required=True)
     notify_wechat.add_argument("--line", action="append", default=[])
+    notify_wechat.add_argument("--database-url", default=settings.database_url)
 
     return parser
 
@@ -401,22 +427,53 @@ def run_exclude_operation(operation_id: int, database_url: str) -> int:
     return 0
 
 
-def run_execute_batch(batch_id: int, quarantine_root: str, database_url: str) -> int:
+def run_execute_batch(
+    batch_id: int,
+    quarantine_root: str,
+    database_url: str,
+    action: str = "quarantine",
+    limit: int | None = None,
+) -> int:
     session = make_session(database_url)
     try:
         summary = execute_confirmed_batch(
             session=session,
             batch_id=batch_id,
             quarantine_root=quarantine_root,
+            action=action,
+            limit=limit,
         )
     finally:
         session.close()
 
     print(f"database_url={database_url}")
-    print(f"batch_id={summary['batch_id']}")
-    print(f"executed={summary['executed']}")
-    print(f"failed={summary['failed']}")
-    print(f"status={summary['status']}")
+    for key, value in summary.items():
+        print(f"{key}={value}")
+    return 0
+
+
+def run_auto_quarantine_duplicates(
+    keep_root: str,
+    quarantine_root: str,
+    limit: int,
+    database_url: str,
+    action: str = "quarantine",
+) -> int:
+    session = make_session(database_url)
+    try:
+        summary = auto_quarantine_exact_duplicates(
+            session=session,
+            keep_root=keep_root,
+            quarantine_root=quarantine_root,
+            limit=limit,
+            action=action,
+        )
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    for key, value in summary.items():
+        print(f"{key}={value}")
     return 0
 
 
@@ -486,6 +543,22 @@ def run_recover_tasks(stale_after_seconds: int, database_url: str) -> int:
     return 0
 
 
+def run_reset_failed_tasks(
+    task_type: str | None,
+    limit: int | None,
+    database_url: str,
+) -> int:
+    session = make_session(database_url)
+    try:
+        summary = reset_failed_tasks(session, task_type=task_type, limit=limit)
+    finally:
+        session.close()
+
+    print(f"database_url={database_url}")
+    print(f"reset={summary['reset']}")
+    return 0
+
+
 def run_process_md5_tasks(
     limit: int,
     max_size_mb: int | None,
@@ -515,6 +588,9 @@ def run_suggest_series_title(candidate_id: int, database_url: str) -> int:
         api_key=settings.deepseek_api_key,
         base_url=settings.deepseek_base_url,
         model=settings.deepseek_model,
+        reasoning_effort=settings.deepseek_reasoning_effort,
+        thinking_enabled=settings.deepseek_thinking_enabled,
+        max_tokens=settings.deepseek_max_tokens,
     )
     try:
         result = suggest_series_title(
@@ -581,24 +657,12 @@ def run_process_phash_tasks(limit: int, database_url: str) -> int:
 
 def run_build_thumbnails(limit: int, cache_root: str, database_url: str) -> int:
     session = make_session(database_url)
-    summary = {
-        "created": 0,
-        "exists": 0,
-        "skipped_non_image": 0,
-        "missing": 0,
-        "failed": 0,
-    }
     try:
-        assets = session.query(models.Asset).order_by(models.Asset.id).limit(limit).all()
-        for asset in assets:
-            result = ensure_thumbnail(
-                session=session,
-                asset_id=asset.id,
-                cache_root=cache_root,
-            )
-            status = str(result["status"])
-            if status in summary:
-                summary[status] += 1
+        summary = build_pending_thumbnails(
+            session=session,
+            cache_root=cache_root,
+            limit=limit,
+        )
     finally:
         session.close()
 
@@ -634,6 +698,7 @@ def run_auto_archive_series(candidate_id: int, archive_root: str, database_url: 
         model=settings.deepseek_model,
         reasoning_effort=settings.deepseek_reasoning_effort,
         thinking_enabled=settings.deepseek_thinking_enabled,
+        max_tokens=settings.deepseek_max_tokens,
     )
     try:
         result = auto_archive_candidate(
@@ -683,6 +748,7 @@ def run_safe_workflow_command(
     *,
     keep_root: str | None,
     cache_root: str,
+    quarantine_root: str,
     md5_limit: int,
     phash_limit: int,
     thumbnail_limit: int,
@@ -691,6 +757,7 @@ def run_safe_workflow_command(
     ai_suggest_limit: int,
     r18_scan_limit: int,
     auto_archive_limit: int,
+    auto_quarantine_limit: int,
     similar_limit: int,
     similar_threshold: int,
     database_url: str,
@@ -716,6 +783,7 @@ def run_safe_workflow_command(
             model=settings.deepseek_model,
             reasoning_effort=settings.deepseek_reasoning_effort,
             thinking_enabled=settings.deepseek_thinking_enabled,
+            max_tokens=settings.deepseek_max_tokens,
         )
     if r18_scan_limit > 0:
         moderation_client = build_visual_moderation_client(settings.r18_provider)
@@ -724,6 +792,7 @@ def run_safe_workflow_command(
             session=session,
             keep_root=keep_root,
             cache_root=cache_root,
+            quarantine_root=quarantine_root,
             md5_limit=md5_limit,
             phash_limit=phash_limit,
             thumbnail_limit=thumbnail_limit,
@@ -732,6 +801,7 @@ def run_safe_workflow_command(
             ai_suggest_limit=ai_suggest_limit,
             r18_scan_limit=r18_scan_limit,
             auto_archive_limit=auto_archive_limit,
+            auto_quarantine_limit=auto_quarantine_limit,
             similar_limit=similar_limit,
             similar_threshold=similar_threshold,
             archive_client=archive_client,
@@ -760,11 +830,17 @@ def run_backup_db(database_url: str, backup_dir: str, label: str) -> int:
     return 0
 
 
-def run_notify_wechat(webhook_url: str | None, title: str, lines: list[str]) -> int:
+def run_notify_wechat(
+    webhook_url: str | None,
+    title: str,
+    lines: list[str],
+    database_url: str | None = None,
+) -> int:
     result = notify_workflow_event(
         webhook_url=webhook_url,
         title=title,
         lines=lines,
+        database_url=database_url,
     )
     print(f"sent={result['sent']}")
     print(f"failed={result['failed']}")
@@ -822,6 +898,16 @@ def main() -> int:
             batch_id=args.batch_id,
             quarantine_root=args.quarantine_root,
             database_url=args.database_url,
+            action=args.action,
+            limit=args.limit,
+        )
+    if args.command == "auto-quarantine-duplicates":
+        return run_auto_quarantine_duplicates(
+            keep_root=args.keep_root,
+            quarantine_root=args.quarantine_root,
+            limit=args.limit,
+            database_url=args.database_url,
+            action=args.action,
         )
     if args.command == "enqueue-md5-tasks":
         return run_enqueue_md5_tasks(limit=args.limit, database_url=args.database_url)
@@ -834,6 +920,12 @@ def main() -> int:
     if args.command == "recover-tasks":
         return run_recover_tasks(
             stale_after_seconds=args.stale_after_seconds,
+            database_url=args.database_url,
+        )
+    if args.command == "reset-failed-tasks":
+        return run_reset_failed_tasks(
+            task_type=args.task_type,
+            limit=args.limit,
             database_url=args.database_url,
         )
     if args.command == "process-md5-tasks":
@@ -878,6 +970,7 @@ def main() -> int:
         return run_safe_workflow_command(
             keep_root=args.keep_root,
             cache_root=args.cache_root,
+            quarantine_root=args.quarantine_root,
             md5_limit=args.md5_limit,
             phash_limit=args.phash_limit,
             thumbnail_limit=args.thumbnail_limit,
@@ -886,6 +979,7 @@ def main() -> int:
             ai_suggest_limit=args.ai_suggest_limit,
             r18_scan_limit=args.r18_scan_limit,
             auto_archive_limit=args.auto_archive_limit,
+            auto_quarantine_limit=args.auto_quarantine_limit,
             similar_limit=args.similar_limit,
             similar_threshold=args.similar_threshold,
             database_url=args.database_url,
@@ -901,6 +995,7 @@ def main() -> int:
             webhook_url=args.webhook_url,
             title=args.title,
             lines=args.line,
+            database_url=args.database_url,
         )
     return 1
 

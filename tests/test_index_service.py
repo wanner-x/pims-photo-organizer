@@ -51,6 +51,33 @@ def test_index_library_persists_media_assets_without_touching_files(tmp_path):
     assert ignored.exists()
 
 
+def test_index_library_includes_iphone_video_and_heic_assets(tmp_path):
+    root = tmp_path / "library"
+    nested = root / "set1"
+    nested.mkdir(parents=True)
+    heic = nested / "001.HEIC"
+    m4v = nested / "clip.m4v"
+    heic.write_bytes(b"heic")
+    m4v.write_bytes(b"m4v")
+    session = make_session(tmp_path)
+
+    summary = index_library(
+        session=session,
+        name="Local photos",
+        kind="local",
+        root_path=root,
+        limit=None,
+    )
+
+    stored_assets = session.query(Asset).order_by(Asset.file_name).all()
+
+    assert summary == {"discovered": 2, "created": 2, "updated": 0}
+    assert [item.file_name for item in stored_assets] == ["001.HEIC", "clip.m4v"]
+    assert {item.file_ext for item in stored_assets} == {".heic", ".m4v"}
+    assert heic.exists()
+    assert m4v.exists()
+
+
 def test_index_library_updates_existing_asset_instead_of_duplicating(tmp_path):
     root = tmp_path / "library"
     root.mkdir()

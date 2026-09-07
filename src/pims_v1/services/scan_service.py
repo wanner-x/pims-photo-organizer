@@ -5,14 +5,25 @@ from itertools import islice
 
 DEFAULT_MEDIA_SUFFIXES = {
     ".arw",
+    ".avi",
+    ".bmp",
     ".cr3",
     ".dng",
     ".gif",
+    ".heic",
+    ".heif",
     ".jpeg",
     ".jpg",
+    ".m4v",
+    ".mkv",
+    ".mov",
     ".mp4",
     ".nef",
+    ".png",
     ".raf",
+    ".tif",
+    ".tiff",
+    ".webp",
     ".wmv",
 }
 

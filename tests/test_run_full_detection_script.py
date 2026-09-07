@@ -10,10 +10,14 @@ def test_full_detection_script_enables_ai_suggestions_by_default():
     assert '"--r18-scan-limit", "$R18ScanLimit"' in script
     assert "[int]$AutoArchiveLimit = 20" in script
     assert '"--auto-archive-limit", "$AutoArchiveLimit"' in script
+    assert "[int]$AutoQuarantineLimit = 500" in script
+    assert '"--auto-quarantine-limit", "$AutoQuarantineLimit"' in script
     assert "[int]$SimilarLimit = 0" in script
     assert '"--similar-limit", "$SimilarLimit"' in script
     assert "[int]$SeriesLimit = 0" in script
     assert '"--series-limit", "$SeriesLimit"' in script
+    assert "[int]$ExecuteConfirmedBatches = 1" in script
+    assert "if ($ExecuteConfirmedBatches -ne 0)" in script
     assert "try {" in script
     assert "catch {" in script
     assert "Round $round failed" in script
